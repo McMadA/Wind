@@ -3,6 +3,7 @@
 import argparse
 import logging
 import sys
+from datetime import datetime
 
 from dotenv import load_dotenv
 import os
@@ -10,6 +11,8 @@ import os
 from sync_drive.gdrive_client import GDriveClient
 from sync_drive.onedrive_client import OneDriveClient
 from sync_drive.sync_engine import SyncEngine
+
+LOG_DIR = "logs"
 
 
 def main() -> int:
@@ -34,17 +37,38 @@ def main() -> int:
         help="Local temp directory for downloads",
     )
     parser.add_argument(
+        "--on-duplicate",
+        choices=("skip", "overwrite", "duplicate"),
+        default="skip",
+        help="How to handle files that already exist in Google Drive: "
+             "skip (default), overwrite, or duplicate",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable verbose (DEBUG) logging",
     )
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s  %(levelname)-8s  %(message)s",
-        datefmt="%H:%M:%S",
+    # ── logging: console + log file ─────────────────────────────────
+    os.makedirs(LOG_DIR, exist_ok=True)
+    log_filename = os.path.join(
+        LOG_DIR, f"sync_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     )
+
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    log_format = "%(asctime)s  %(levelname)-8s  %(message)s"
+
+    logging.basicConfig(
+        level=log_level,
+        format=log_format,
+        datefmt="%H:%M:%S",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(log_filename, encoding="utf-8"),
+        ],
+    )
+    logging.info("Log file: %s", log_filename)
 
     # ── build clients ───────────────────────────────────────────────
     client_id = os.getenv("ONEDRIVE_CLIENT_ID")
@@ -74,19 +98,26 @@ def main() -> int:
         gdrive=gdrive,
         temp_dir=args.temp_dir,
         target_folder_id=args.gdrive_folder_id,
+        on_duplicate=args.on_duplicate,
     )
 
     print("\n=== OneDrive -> Google Drive Sync ===\n")
+    logging.info("Duplicate mode: %s", args.on_duplicate)
     result = engine.run(onedrive_folder=args.onedrive_folder)
+
+    summary = result.summary()
     print(f"\n{'='*40}")
-    print(result.summary())
+    print(summary)
     print(f"{'='*40}\n")
+    logging.info("Sync complete.\n%s", summary)
 
     if result.all_ok:
         print("All files synced and verified successfully.")
+        print(f"Full log saved to: {log_filename}")
         return 0
     else:
         print("Some files failed — see details above.")
+        print(f"Full log saved to: {log_filename}")
         return 1
 
 

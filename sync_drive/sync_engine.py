@@ -41,17 +41,27 @@ class SyncResult:
 class SyncEngine:
     """Downloads files from OneDrive, uploads to Google Drive, and verifies checksums."""
 
+    # Modes for handling files that already exist in Google Drive:
+    #   "skip"      – skip the file entirely (don't re-upload)
+    #   "overwrite" – replace the existing file with the new version
+    #   "duplicate" – upload anyway (creates a second copy, old behaviour)
+    DUPLICATE_MODES = ("skip", "overwrite", "duplicate")
+
     def __init__(
         self,
         onedrive: OneDriveClient,
         gdrive: GDriveClient,
         temp_dir: str = ".sync_temp",
         target_folder_id: str = "root",
+        on_duplicate: str = "skip",
     ):
+        if on_duplicate not in self.DUPLICATE_MODES:
+            raise ValueError(f"on_duplicate must be one of {self.DUPLICATE_MODES}")
         self._onedrive = onedrive
         self._gdrive = gdrive
         self._temp_dir = temp_dir
         self._target_folder_id = target_folder_id
+        self._on_duplicate = on_duplicate
 
     def run(self, onedrive_folder: str = "/") -> SyncResult:
         """Execute a full sync cycle and return the result."""
@@ -81,18 +91,35 @@ class SyncEngine:
     def _sync_one(self, file_meta: dict, temp: Path, result: SyncResult) -> None:
         rel_path = file_meta["path"]
 
-        # 1. Download from OneDrive
+        # 1. Resolve destination folder in Google Drive
+        parent_dir = str(Path(rel_path).parent).lstrip("/")
+        gdrive_parent = self._gdrive.ensure_path(parent_dir, self._target_folder_id)
+
+        # 2. Check if file already exists in Google Drive
+        existing = self._gdrive.find_file(file_meta["name"], gdrive_parent)
+        if existing:
+            if self._on_duplicate == "skip":
+                logger.info("SKIP (already exists): %s", rel_path)
+                result.skipped.append(rel_path)
+                return
+            elif self._on_duplicate == "overwrite":
+                logger.info("File exists, will overwrite: %s", rel_path)
+            # "duplicate" falls through and uploads a new copy
+
+        # 3. Download from OneDrive
         logger.info("[1/3] Downloading: %s", rel_path)
         local_path = self._onedrive.download_file(file_meta, str(temp))
         result.transferred.append(rel_path)
 
-        # 2. Upload to Google Drive
-        logger.info("[2/3] Uploading : %s", rel_path)
-        parent_dir = str(Path(rel_path).parent).lstrip("/")
-        gdrive_parent = self._gdrive.ensure_path(parent_dir, self._target_folder_id)
-        uploaded = self._gdrive.upload_file(local_path, gdrive_parent)
+        # 4. Upload (or overwrite) to Google Drive
+        if existing and self._on_duplicate == "overwrite":
+            logger.info("[2/3] Overwriting: %s", rel_path)
+            uploaded = self._gdrive.update_file(existing["id"], local_path)
+        else:
+            logger.info("[2/3] Uploading : %s", rel_path)
+            uploaded = self._gdrive.upload_file(local_path, gdrive_parent)
 
-        # 3. Verify integrity
+        # 5. Verify integrity
         logger.info("[3/3] Verifying : %s", rel_path)
         if self._verify(local_path, uploaded):
             result.verified.append(rel_path)

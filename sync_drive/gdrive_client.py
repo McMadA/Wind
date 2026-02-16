@@ -79,6 +79,22 @@ class GDriveClient:
             current = self._ensure_folder(part, current)
         return current
 
+    # ── query ────────────────────────────────────────────────────────
+
+    def find_file(self, name: str, parent_folder_id: str) -> dict | None:
+        """Return metadata of an existing file with *name* in *parent_folder_id*, or None."""
+        query = (
+            f"name='{name}' and '{parent_folder_id}' in parents "
+            f"and mimeType!='application/vnd.google-apps.folder' and trashed=false"
+        )
+        results = (
+            self._service.files()
+            .list(q=query, fields="files(id,name,md5Checksum,size)")
+            .execute()
+        )
+        files = results.get("files", [])
+        return files[0] if files else None
+
     # ── upload ──────────────────────────────────────────────────────
 
     def upload_file(self, local_path: Path, parent_folder_id: str) -> dict:
@@ -92,6 +108,17 @@ class GDriveClient:
         )
         logger.info("Uploaded %s  (id=%s)", local_path.name, uploaded["id"])
         return uploaded
+
+    def update_file(self, file_id: str, local_path: Path) -> dict:
+        """Overwrite an existing Google Drive file with new content."""
+        media = MediaFileUpload(str(local_path), resumable=True)
+        updated = (
+            self._service.files()
+            .update(fileId=file_id, media_body=media, fields="id,name,md5Checksum,size")
+            .execute()
+        )
+        logger.info("Overwritten %s  (id=%s)", local_path.name, updated["id"])
+        return updated
 
     # ── verification ────────────────────────────────────────────────
 
