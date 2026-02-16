@@ -1,0 +1,10 @@
+.env
+credentials.json
+token.json
+*.pickle
+.sync_temp/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
