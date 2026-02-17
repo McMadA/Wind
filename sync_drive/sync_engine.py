@@ -97,7 +97,7 @@ class SyncEngine:
 
         try:
             logger.info("Listing files in OneDrive folder: %s", onedrive_folder)
-            files = self._onedrive.list_files(onedrive_folder)
+            files = self._scan_with_progress(onedrive_folder)
             logger.info("Found %d file(s) to sync.", len(files))
 
             if self._console:
@@ -109,6 +109,38 @@ class SyncEngine:
                 shutil.rmtree(temp, ignore_errors=True)
 
         return result
+
+    # ── scanning with progress ───────────────────────────────────────
+
+    def _scan_with_progress(self, onedrive_folder: str) -> list[dict]:
+        """List OneDrive files while showing a live scanning indicator."""
+        if not self._console:
+            return self._onedrive.list_files(onedrive_folder)
+
+        scan_progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]{task.description}"),
+            TextColumn("[cyan]{task.fields[folder]}"),
+            console=self._console,
+        )
+        with scan_progress:
+            task = scan_progress.add_task(
+                "Scanning OneDrive — 0 files found", folder="", total=None
+            )
+
+            def on_file_found(count: int, folder: str) -> None:
+                short_folder = folder if len(folder) <= 60 else "..." + folder[-57:]
+                scan_progress.update(
+                    task,
+                    description=f"Scanning OneDrive — {count} files found",
+                    folder=short_folder,
+                )
+
+            files = self._onedrive.list_files(
+                onedrive_folder, progress_callback=on_file_found
+            )
+
+        return files
 
     # ── plain mode (no progress bars) ────────────────────────────────
 

@@ -75,13 +75,26 @@ class OneDriveClient:
 
     # ── file operations ─────────────────────────────────────────────
 
-    def list_files(self, folder_path: str = "/") -> list[dict]:
-        """Return a flat list of file metadata dicts under *folder_path* (recursive)."""
+    def list_files(
+        self,
+        folder_path: str = "/",
+        progress_callback: Callable[[int, str], None] | None = None,
+    ) -> list[dict]:
+        """Return a flat list of file metadata dicts under *folder_path* (recursive).
+
+        *progress_callback(file_count, current_folder)* is called each time a
+        new file is discovered so the caller can display scanning progress.
+        """
         items: list[dict] = []
-        self._walk(folder_path, items)
+        self._walk(folder_path, items, progress_callback)
         return items
 
-    def _walk(self, path: str, accumulator: list[dict]) -> None:
+    def _walk(
+        self,
+        path: str,
+        accumulator: list[dict],
+        progress_callback: Callable[[int, str], None] | None = None,
+    ) -> None:
         logger.info("  Scanning: %s", path)
         endpoint = (
             f"{GRAPH_BASE}/me/drive/root/children"
@@ -95,7 +108,7 @@ class OneDriveClient:
             for item in data.get("value", []):
                 if "folder" in item:
                     child_path = f"{path.rstrip('/')}/{item['name']}"
-                    self._walk(child_path, accumulator)
+                    self._walk(child_path, accumulator, progress_callback)
                 elif "file" in item:
                     accumulator.append({
                         "id": item["id"],
@@ -106,6 +119,8 @@ class OneDriveClient:
                         "sha1": item.get("file", {}).get("hashes", {}).get("sha1Hash"),
                         "download_url": item.get("@microsoft.graph.downloadUrl"),
                     })
+                    if progress_callback:
+                        progress_callback(len(accumulator), path)
             endpoint = data.get("@odata.nextLink")
 
     def download_file(
