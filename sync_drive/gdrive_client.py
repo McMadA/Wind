@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from google.auth.transport.requests import Request
@@ -97,28 +98,50 @@ class GDriveClient:
 
     # ── upload ──────────────────────────────────────────────────────
 
-    def upload_file(self, local_path: Path, parent_folder_id: str) -> dict:
+    def upload_file(
+        self,
+        local_path: Path,
+        parent_folder_id: str,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> dict:
         """Upload *local_path* into *parent_folder_id*. Returns the Google Drive file metadata."""
         media = MediaFileUpload(str(local_path), resumable=True)
         meta = {"name": local_path.name, "parents": [parent_folder_id]}
-        uploaded = (
-            self._service.files()
-            .create(body=meta, media_body=media, fields="id,name,md5Checksum,size")
-            .execute()
+        request = self._service.files().create(
+            body=meta, media_body=media, fields="id,name,md5Checksum,size"
         )
-        logger.info("Uploaded %s  (id=%s)", local_path.name, uploaded["id"])
-        return uploaded
+        response = None
+        while response is None:
+            status, response = request.next_chunk()
+            if status and progress_callback:
+                progress_callback(int(status.resumable_progress), int(status.total_size))
+        if progress_callback and response:
+            total = os.path.getsize(local_path)
+            progress_callback(total, total)
+        logger.debug("Uploaded %s  (id=%s)", local_path.name, response["id"])
+        return response
 
-    def update_file(self, file_id: str, local_path: Path) -> dict:
+    def update_file(
+        self,
+        file_id: str,
+        local_path: Path,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> dict:
         """Overwrite an existing Google Drive file with new content."""
         media = MediaFileUpload(str(local_path), resumable=True)
-        updated = (
-            self._service.files()
-            .update(fileId=file_id, media_body=media, fields="id,name,md5Checksum,size")
-            .execute()
+        request = self._service.files().update(
+            fileId=file_id, media_body=media, fields="id,name,md5Checksum,size"
         )
-        logger.info("Overwritten %s  (id=%s)", local_path.name, updated["id"])
-        return updated
+        response = None
+        while response is None:
+            status, response = request.next_chunk()
+            if status and progress_callback:
+                progress_callback(int(status.resumable_progress), int(status.total_size))
+        if progress_callback and response:
+            total = os.path.getsize(local_path)
+            progress_callback(total, total)
+        logger.debug("Overwritten %s  (id=%s)", local_path.name, response["id"])
+        return response
 
     # ── verification ────────────────────────────────────────────────
 

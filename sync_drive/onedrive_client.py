@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import msal
@@ -54,7 +55,10 @@ class OneDriveClient:
             flow = self._app.initiate_device_flow(scopes=SCOPES)
             if "user_code" not in flow:
                 raise RuntimeError(f"Device flow failed: {flow.get('error_description', 'unknown error')}")
-            print(f"\n  To sign in, visit https://microsoft.com/devicelogin and enter code: {flow['user_code']}\n")
+            logger.info(
+                "To sign in, visit https://microsoft.com/devicelogin and enter code: %s",
+                flow["user_code"],
+            )
             result = self._app.acquire_token_by_device_flow(flow)
 
         if "access_token" not in result:
@@ -100,7 +104,12 @@ class OneDriveClient:
                     })
             endpoint = data.get("@odata.nextLink")
 
-    def download_file(self, file_meta: dict, dest_dir: str) -> Path:
+    def download_file(
+        self,
+        file_meta: dict,
+        dest_dir: str,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> Path:
         """Download a single file to *dest_dir*, preserving its relative path. Returns the local Path."""
         relative = file_meta["path"].lstrip("/")
         local_path = Path(dest_dir) / relative
@@ -110,12 +119,18 @@ class OneDriveClient:
         if not url:
             url = f"{GRAPH_BASE}/me/drive/items/{file_meta['id']}/content"
 
-        logger.info("Downloading %s ...", relative)
+        logger.debug("Downloading %s ...", relative)
         resp = requests.get(url, headers=self._headers(), stream=True, timeout=120)
         resp.raise_for_status()
+
+        total_size = file_meta.get("size") or int(resp.headers.get("Content-Length", 0))
+        downloaded = 0
         with open(local_path, "wb") as f:
             for chunk in resp.iter_content(chunk_size=8192):
                 f.write(chunk)
+                downloaded += len(chunk)
+                if progress_callback:
+                    progress_callback(downloaded, total_size)
 
         return local_path
 
