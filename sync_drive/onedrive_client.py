@@ -4,6 +4,7 @@ import hashlib
 import logging
 import os
 from collections.abc import Callable
+import sys
 from pathlib import Path
 
 import msal
@@ -59,6 +60,8 @@ class OneDriveClient:
                 "To sign in, visit https://microsoft.com/devicelogin and enter code: %s",
                 flow["user_code"],
             )
+            print(f"\n  To sign in, visit https://microsoft.com/devicelogin and enter code: {flow['user_code']}\n")
+            sys.stdout.flush()
             result = self._app.acquire_token_by_device_flow(flow)
 
         if "access_token" not in result:
@@ -79,6 +82,7 @@ class OneDriveClient:
         return items
 
     def _walk(self, path: str, accumulator: list[dict]) -> None:
+        logger.info("  Scanning: %s", path)
         endpoint = (
             f"{GRAPH_BASE}/me/drive/root/children"
             if path == "/"
