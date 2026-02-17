@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import shutil
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from rich.console import Console
 from rich.progress import (
@@ -156,8 +156,12 @@ class SyncEngine:
                         file_progress=file_progress,
                         file_size=file_size,
                     )
-                except Exception:
-                    logger.exception("Failed to sync %s", rel_path)
+                except Exception as exc:
+                    # Use logger.error (not .exception) during progress display
+                    # to avoid RichHandler traceback rendering conflicts.
+                    # Full tracebacks still go to the log file via the plain FileHandler.
+                    logger.error("Failed to sync %s: %s", rel_path, exc)
+                    logger.debug("Traceback for %s", rel_path, exc_info=True)
                     result.failed.append(rel_path)
 
                 overall_progress.advance(overall_task)
@@ -177,7 +181,9 @@ class SyncEngine:
         size_str = format_size(file_size) if file_size else ""
 
         # 1. Resolve destination folder in Google Drive
-        parent_dir = str(Path(rel_path).parent).lstrip("/")
+        # Use PurePosixPath because OneDrive paths always use forward slashes,
+        # but pathlib.Path converts to backslashes on Windows.
+        parent_dir = str(PurePosixPath(rel_path).parent).lstrip("/")
         gdrive_parent = self._gdrive.ensure_path(parent_dir, self._target_folder_id)
 
         # 2. Check if file already exists in Google Drive
