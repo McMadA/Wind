@@ -45,14 +45,20 @@ class GDriveClient:
 
     # ── folder helpers ──────────────────────────────────────────────
 
+    @staticmethod
+    def _escape_query(value: str) -> str:
+        """Escape a value for use in a Google Drive API query string."""
+        return value.replace("\\", "\\\\").replace("'", "\\'")
+
     def _ensure_folder(self, name: str, parent_id: str) -> str:
         """Return the ID of *name* inside *parent_id*, creating it if needed."""
         cache_key = f"{parent_id}/{name}"
         if cache_key in self._folder_cache:
             return self._folder_cache[cache_key]
 
+        safe_name = self._escape_query(name)
         query = (
-            f"name='{name}' and '{parent_id}' in parents "
+            f"name='{safe_name}' and '{parent_id}' in parents "
             f"and mimeType='application/vnd.google-apps.folder' and trashed=false"
         )
         results = self._service.files().list(q=query, fields="files(id)").execute()
@@ -84,8 +90,9 @@ class GDriveClient:
 
     def find_file(self, name: str, parent_folder_id: str) -> dict | None:
         """Return metadata of an existing file with *name* in *parent_folder_id*, or None."""
+        safe_name = self._escape_query(name)
         query = (
-            f"name='{name}' and '{parent_folder_id}' in parents "
+            f"name='{safe_name}' and '{parent_folder_id}' in parents "
             f"and mimeType!='application/vnd.google-apps.folder' and trashed=false"
         )
         results = (
