@@ -27,6 +27,41 @@ transfer using MD5 checksums.
 - A **Microsoft Azure** app registration (for OneDrive / Microsoft Graph access)
 - A **Google Cloud** project with the Drive API enabled and an OAuth 2.0 client
 
+## Getting credentials
+
+### OneDrive (Microsoft Azure)
+
+1. Go to the [Azure App Registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) portal and sign in.
+2. Click **New registration**.
+   - **Name**: choose any name (e.g. `WindSync`)
+   - **Supported account types**: select *Personal Microsoft accounts only* (or include org accounts if needed)
+   - **Redirect URI**: select **Public client/native (mobile & desktop)** and enter `http://localhost:8400`
+3. Click **Register**. On the overview page, copy the **Application (client) ID** — this is your `ONEDRIVE_CLIENT_ID`.
+4. In the left sidebar go to **Certificates & secrets** > **Client secrets** > **New client secret**. Copy the secret **Value** (not the ID) — this is your `ONEDRIVE_CLIENT_SECRET`.
+5. In **API permissions**, make sure **Microsoft Graph > Files.Read** (delegated) is listed. Click **Add a permission** > **Microsoft Graph** > **Delegated permissions** > search for `Files.Read` and `Files.Read.All`, then add them.
+
+### Google Drive
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/) and create a new project (or select an existing one).
+2. Enable the **Google Drive API**: go to **APIs & Services** > **Library**, search for "Google Drive API", and click **Enable**.
+3. Set up the OAuth consent screen: go to **APIs & Services** > **OAuth consent screen**.
+   - Choose **External** user type and click **Create**.
+   - Fill in the required app name and email fields, then click **Save and Continue**.
+   - On the **Scopes** step, click **Add or remove scopes**, search for `https://www.googleapis.com/auth/drive`, select it, and click **Update**.
+   - Add your Google account email under **Test users** (required while the app is in "Testing" status).
+4. Create credentials: go to **APIs & Services** > **Credentials** > **Create Credentials** > **OAuth client ID**.
+   - **Application type**: Desktop app
+   - **Name**: choose any name
+5. Click **Download JSON** and save the file as `credentials.json` in the project root.
+
+### Finding your Google Drive folder ID
+
+If you want to sync into a specific Google Drive folder instead of the root:
+
+1. Open the folder in [Google Drive](https://drive.google.com) in your browser.
+2. The URL will look like: `https://drive.google.com/drive/folders/1aBcDeFgHiJkLmNoPqRsTuVwXyZ`
+3. The last part of the URL (`1aBcDeFgHiJkLmNoPqRsTuVwXyZ`) is the folder ID — use it as `GOOGLE_DRIVE_TARGET_FOLDER` in your `.env`.
+
 ## Setup
 
 ```bash
@@ -36,10 +71,10 @@ pip install -r requirements.txt
 # 2. Configure credentials
 cp .env.example .env
 # Fill in ONEDRIVE_CLIENT_ID, ONEDRIVE_CLIENT_SECRET, etc.
+# (see "Getting credentials" above)
 
 # 3. Place your Google OAuth credentials file
-#    Download credentials.json from Google Cloud Console and put it
-#    in the project root.
+#    (credentials.json from the Google Cloud Console step above)
 ```
 
 ## Usage

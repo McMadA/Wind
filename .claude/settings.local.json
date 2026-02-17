@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(git pull:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git -C /c/Users/Admin/Documents/GitHub/Wind log --all --oneline)",
+      "Bash(git -C /c/Users/Admin/Documents/GitHub/Wind log --all --diff-filter=A --name-only --pretty=format:\"%h %s\" -- \"*.json\" \"*.env\" \"*.bin\" \"*.pickle\" \"token*\" \"credentials*\")",
+      "Bash(git -C /c/Users/Admin/Documents/GitHub/Wind log --all -p -- \".env\" \"credentials.json\" \"token.json\" \"onedrive_token_cache.bin\")",
+      "Bash(git -C /c/Users/Admin/Documents/GitHub/Wind ls-tree -r --name-only HEAD)",
+      "Bash(git -C /c/Users/Admin/Documents/GitHub/Wind log --all -p -S \"client_secret\" -- \"*.py\" \"*.json\" \"*.env\")",
+      "Bash(git -C /c/Users/Admin/Documents/GitHub/Wind log --all -p -S \"GOCSPX\")",
+      "Bash(git -C /c/Users/Admin/Documents/GitHub/Wind ls-files:*)",
+      "Bash(git -C /c/Users/Admin/Documents/GitHub/Wind log --all --diff-filter=A --name-only --pretty=format:\"%h\")",
+      "Bash(grep:*)"
+    ]
+  }
+}
