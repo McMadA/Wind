@@ -1,23 +1,29 @@
 """CLI entry point for OneDrive -> Google Drive sync."""
 
+from __future__ import annotations
+
 import argparse
 import logging
+import os
 import sys
+import time
 from datetime import datetime
 
 from dotenv import load_dotenv
-import os
+from rich.console import Console
+from rich.logging import RichHandler
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from sync_drive.gdrive_client import GDriveClient
 from sync_drive.onedrive_client import OneDriveClient
-from sync_drive.sync_engine import SyncEngine
+from sync_drive.sync_engine import SyncEngine, format_size
 
 LOG_DIR = "logs"
 
 
-def main() -> int:
-    load_dotenv()
-
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Sync files from OneDrive to Google Drive with verification."
     )
@@ -48,29 +54,119 @@ def main() -> int:
         action="store_true",
         help="Enable verbose (DEBUG) logging",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable colored output and progress bars",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List files that would be synced without transferring",
+    )
+    return parser
 
-    # ── logging: console + log file ─────────────────────────────────
+
+def _setup_logging(
+    verbose: bool,
+    console: Console,
+    log_filename: str,
+) -> None:
+    """Configure dual logging: rich console + plain-text log file."""
+    log_level = logging.DEBUG if verbose else logging.INFO
+    plain_format = "%(asctime)s  %(levelname)-8s  %(message)s"
+
+    root = logging.getLogger()
+    root.setLevel(log_level)
+
+    # Rich console handler (colored, structured)
+    rich_handler = RichHandler(
+        console=console,
+        show_time=True,
+        show_path=False,
+        markup=False,
+        rich_tracebacks=True,
+    )
+    rich_handler.setLevel(log_level)
+    root.addHandler(rich_handler)
+
+    # Plain-text file handler (no ANSI in log files)
+    file_handler = logging.FileHandler(log_filename, encoding="utf-8")
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(logging.Formatter(plain_format, datefmt="%H:%M:%S"))
+    root.addHandler(file_handler)
+
+
+def _print_summary(console: Console, result, elapsed: float, log_filename: str) -> None:
+    """Print a rich summary panel at the end of a sync run."""
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_column("Metric", style="bold")
+    table.add_column("Value", justify="right")
+
+    table.add_row("Transferred", f"[green]{len(result.transferred)}[/green]")
+    table.add_row("Verified OK", f"[green]{len(result.verified)}[/green]")
+    failed_style = "red bold" if result.failed else "green"
+    table.add_row("Failed", f"[{failed_style}]{len(result.failed)}[/{failed_style}]")
+    table.add_row("Skipped", str(len(result.skipped)))
+    if result.total_bytes:
+        table.add_row("Total data", format_size(result.total_bytes))
+    table.add_row("Elapsed", f"{elapsed:.1f}s")
+
+    panel_style = "green" if result.all_ok else "red"
+    title = "Sync Complete" if result.all_ok else "Sync Complete (with errors)"
+    panel = Panel(table, title=title, border_style=panel_style, padding=(1, 2))
+    console.print()
+    console.print(panel)
+
+    if result.failed:
+        console.print()
+        failed_text = Text("Failed files:", style="red bold")
+        console.print(failed_text)
+        for f in result.failed:
+            console.print(f"  - {f}", style="red")
+
+    console.print(f"\nFull log saved to: {log_filename}", style="dim")
+
+
+def _print_dry_run(console: Console, files: list[dict]) -> None:
+    """Print a table of files that would be synced."""
+    table = Table(title="Files to sync (dry run)", show_lines=False)
+    table.add_column("#", style="dim", justify="right")
+    table.add_column("File", style="cyan")
+    table.add_column("Size", justify="right")
+    table.add_column("Path", style="dim")
+
+    total_bytes = 0
+    for i, f in enumerate(files, 1):
+        size = f.get("size", 0)
+        total_bytes += size
+        table.add_row(str(i), f["name"], format_size(size), f["path"])
+
+    console.print()
+    console.print(table)
+    console.print(
+        f"\n[bold]{len(files)}[/bold] file(s), "
+        f"[bold]{format_size(total_bytes)}[/bold] total"
+    )
+
+
+def main() -> int:
+    load_dotenv()
+    args = _build_parser().parse_args()
+
+    # ── console setup ────────────────────────────────────────────────
+    use_color = sys.stdout.isatty() and not args.no_color and not os.getenv("NO_COLOR")
+    console = Console(force_terminal=use_color, no_color=not use_color)
+
+    # ── logging setup ────────────────────────────────────────────────
     os.makedirs(LOG_DIR, exist_ok=True)
     log_filename = os.path.join(
         LOG_DIR, f"sync_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     )
-
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    log_format = "%(asctime)s  %(levelname)-8s  %(message)s"
-
-    logging.basicConfig(
-        level=log_level,
-        format=log_format,
-        datefmt="%H:%M:%S",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(log_filename, encoding="utf-8"),
-        ],
-    )
+    _setup_logging(args.verbose, console, log_filename)
     logging.info("Log file: %s", log_filename)
 
-    # ── build clients ───────────────────────────────────────────────
+    # ── build clients ────────────────────────────────────────────────
     client_id = os.getenv("ONEDRIVE_CLIENT_ID")
     client_secret = os.getenv("ONEDRIVE_CLIENT_SECRET")
     tenant_id = os.getenv("ONEDRIVE_TENANT_ID", "common")
@@ -92,33 +188,35 @@ def main() -> int:
     )
     gdrive = GDriveClient(credentials_file=credentials_file)
 
-    # ── run sync ────────────────────────────────────────────────────
+    # ── dry-run mode ─────────────────────────────────────────────────
+    if args.dry_run:
+        logging.info("Dry-run mode: listing files without transferring.")
+        files = onedrive.list_files(args.onedrive_folder)
+        _print_dry_run(console, files)
+        return 0
+
+    # ── run sync ─────────────────────────────────────────────────────
+    console.print(
+        Panel("OneDrive -> Google Drive Sync", style="bold blue", padding=(0, 2))
+    )
+    logging.info("Duplicate mode: %s", args.on_duplicate)
+
     engine = SyncEngine(
         onedrive=onedrive,
         gdrive=gdrive,
         temp_dir=args.temp_dir,
         target_folder_id=args.gdrive_folder_id,
         on_duplicate=args.on_duplicate,
+        console=console if use_color else None,
     )
 
-    print("\n=== OneDrive -> Google Drive Sync ===\n")
-    logging.info("Duplicate mode: %s", args.on_duplicate)
+    start = time.monotonic()
     result = engine.run(onedrive_folder=args.onedrive_folder)
+    elapsed = time.monotonic() - start
 
-    summary = result.summary()
-    print(f"\n{'='*40}")
-    print(summary)
-    print(f"{'='*40}\n")
-    logging.info("Sync complete.\n%s", summary)
+    _print_summary(console, result, elapsed, log_filename)
 
-    if result.all_ok:
-        print("All files synced and verified successfully.")
-        print(f"Full log saved to: {log_filename}")
-        return 0
-    else:
-        print("Some files failed — see details above.")
-        print(f"Full log saved to: {log_filename}")
-        return 1
+    return 0 if result.all_ok else 1
 
 
 if __name__ == "__main__":

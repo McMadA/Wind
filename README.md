@@ -3,6 +3,16 @@
 Automatically moves files from OneDrive to Google Drive and verifies every
 transfer using MD5 checksums.
 
+## Features
+
+- **Recursive sync** – syncs all files and folders from a OneDrive directory
+- **MD5 verification** – every upload is verified against Google Drive's checksum
+- **Progress bars** – real-time download/upload progress with transfer speeds
+- **Colored output** – structured, color-coded log messages in the terminal
+- **Dry-run mode** – preview which files would be synced before transferring
+- **Duplicate handling** – skip, overwrite, or create copies of existing files
+- **Audit log** – every run is saved to a timestamped log file in `logs/`
+
 ## How it works
 
 1. Lists all files in the specified OneDrive folder (recursively).
@@ -41,8 +51,14 @@ python -m sync_drive.cli
 # Sync a specific OneDrive folder into a specific Google Drive folder
 python -m sync_drive.cli --onedrive-folder /Documents --gdrive-folder-id <folder-id>
 
+# Preview files without transferring (dry run)
+python -m sync_drive.cli --dry-run
+
 # Verbose output
 python -m sync_drive.cli -v
+
+# Disable colored output and progress bars
+python -m sync_drive.cli --no-color
 ```
 
 ## Configuration
@@ -58,14 +74,22 @@ All options can be set via environment variables (`.env`) or CLI flags:
 | `GOOGLE_CREDENTIALS_FILE`    | –                     | `credentials.json`|
 | `GOOGLE_DRIVE_TARGET_FOLDER` | `--gdrive-folder-id`  | `root`            |
 | `TEMP_DIR`                   | `--temp-dir`          | `.sync_temp`      |
+| –                            | `--on-duplicate`      | `skip`            |
+| –                            | `--dry-run`           | off               |
+| –                            | `--no-color`          | off               |
+| –                            | `--verbose` / `-v`    | off               |
+| `NO_COLOR`                   | –                     | *(unset)*         |
+
+Set the `NO_COLOR` environment variable to any value to disable colored output
+(follows the [no-color.org](https://no-color.org/) convention).
 
 ## Project structure
 
 ```
 sync_drive/
-  __init__.py
-  cli.py               # CLI entry point
+  __init__.py           # Package version
+  cli.py                # CLI entry point with rich logging and progress
   onedrive_client.py    # Microsoft Graph / OneDrive API wrapper
   gdrive_client.py      # Google Drive API wrapper
-  sync_engine.py        # Orchestrator with checksum verification
+  sync_engine.py        # Orchestrator with progress bars and checksum verification
 ```
