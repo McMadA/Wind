@@ -1,0 +1,12 @@
+.env
+credentials.json
+token.json
+*.pickle
+.sync_temp/
+logs/
+onedrive_token_cache.bin
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
