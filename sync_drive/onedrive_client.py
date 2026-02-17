@@ -115,12 +115,20 @@ class OneDriveClient:
         local_path = Path(dest_dir) / relative
         local_path.parent.mkdir(parents=True, exist_ok=True)
 
-        url = file_meta.get("download_url")
+        # Always fetch a fresh download URL – the one captured during list_files
+        # contains a short-lived tempauth token that expires within seconds.
+        meta_resp = requests.get(
+            f"{GRAPH_BASE}/me/drive/items/{file_meta['id']}",
+            headers=self._headers(),
+            timeout=30,
+        )
+        meta_resp.raise_for_status()
+        url = meta_resp.json().get("@microsoft.graph.downloadUrl")
         if not url:
             url = f"{GRAPH_BASE}/me/drive/items/{file_meta['id']}/content"
 
         logger.debug("Downloading %s ...", relative)
-        resp = requests.get(url, headers=self._headers(), stream=True, timeout=120)
+        resp = requests.get(url, stream=True, timeout=120)
         resp.raise_for_status()
 
         total_size = file_meta.get("size") or int(resp.headers.get("Content-Length", 0))
