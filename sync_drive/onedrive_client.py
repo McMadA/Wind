@@ -3,7 +3,7 @@
 import hashlib
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 import sys
 from pathlib import Path
 
@@ -79,22 +79,20 @@ class OneDriveClient:
         self,
         folder_path: str = "/",
         progress_callback: Callable[[int, str], None] | None = None,
-    ) -> list[dict]:
-        """Return a flat list of file metadata dicts under *folder_path* (recursive).
+    ) -> Generator[dict, None, None]:
+        """Return a flat generator of file metadata dicts under *folder_path* (recursive).
 
         *progress_callback(file_count, current_folder)* is called each time a
         new file is discovered so the caller can display scanning progress.
         """
-        items: list[dict] = []
-        self._walk(folder_path, items, progress_callback)
-        return items
+        return self._walk(folder_path, [0], progress_callback)
 
     def _walk(
         self,
         path: str,
-        accumulator: list[dict],
+        counter: list[int],
         progress_callback: Callable[[int, str], None] | None = None,
-    ) -> None:
+    ) -> Generator[dict, None, None]:
         logger.info("  Scanning: %s", path)
         endpoint = (
             f"{GRAPH_BASE}/me/drive/root/children"
@@ -108,9 +106,9 @@ class OneDriveClient:
             for item in data.get("value", []):
                 if "folder" in item:
                     child_path = f"{path.rstrip('/')}/{item['name']}"
-                    self._walk(child_path, accumulator, progress_callback)
+                    yield from self._walk(child_path, counter, progress_callback)
                 elif "file" in item:
-                    accumulator.append({
+                    file_meta = {
                         "id": item["id"],
                         "name": item["name"],
                         "path": f"{path.rstrip('/')}/{item['name']}",
@@ -118,9 +116,11 @@ class OneDriveClient:
                         "sha256": item.get("file", {}).get("hashes", {}).get("sha256Hash"),
                         "sha1": item.get("file", {}).get("hashes", {}).get("sha1Hash"),
                         "download_url": item.get("@microsoft.graph.downloadUrl"),
-                    })
+                    }
+                    counter[0] += 1
+                    yield file_meta
                     if progress_callback:
-                        progress_callback(len(accumulator), path)
+                        progress_callback(counter[0], path)
             endpoint = data.get("@odata.nextLink")
 
     def download_file(

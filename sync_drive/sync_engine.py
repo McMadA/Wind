@@ -115,7 +115,7 @@ class SyncEngine:
     def _scan_with_progress(self, onedrive_folder: str) -> list[dict]:
         """List OneDrive files while showing a live scanning indicator."""
         if not self._console:
-            return self._onedrive.list_files(onedrive_folder)
+            return list(self._onedrive.list_files(onedrive_folder))
 
         scan_progress = Progress(
             SpinnerColumn(),
@@ -136,9 +136,9 @@ class SyncEngine:
                     folder=short_folder,
                 )
 
-            files = self._onedrive.list_files(
+            files = list(self._onedrive.list_files(
                 onedrive_folder, progress_callback=on_file_found
-            )
+            ))
 
         return files
 
