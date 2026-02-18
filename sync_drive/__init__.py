@@ -1,3 +1,3 @@
-"""Wind – OneDrive to Google Drive sync tool."""
+"""Wind – OneDrive <-> Google Drive sync tool."""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

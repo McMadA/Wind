@@ -1,10 +1,11 @@
-"""Sync engine – orchestrates downloading from OneDrive, uploading to Google Drive, and verifying integrity."""
+"""Sync engine – orchestrates downloading and uploading between OneDrive and Google Drive with integrity verification."""
 
 from __future__ import annotations
 
 import logging
 import shutil
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path, PurePosixPath
 
 from rich.console import Console
@@ -23,6 +24,11 @@ from sync_drive.gdrive_client import GDriveClient
 from sync_drive.onedrive_client import OneDriveClient
 
 logger = logging.getLogger(__name__)
+
+
+class SyncDirection(Enum):
+    ONEDRIVE_TO_GDRIVE = "onedrive-to-gdrive"
+    GDRIVE_TO_ONEDRIVE = "gdrive-to-onedrive"
 
 
 def format_size(num_bytes: int) -> str:
@@ -65,7 +71,7 @@ class SyncResult:
 
 
 class SyncEngine:
-    """Downloads files from OneDrive, uploads to Google Drive, and verifies checksums."""
+    """Syncs files between OneDrive and Google Drive with checksum verification."""
 
     DUPLICATE_MODES = ("skip", "overwrite", "duplicate")
 
@@ -74,30 +80,78 @@ class SyncEngine:
         onedrive: OneDriveClient,
         gdrive: GDriveClient,
         temp_dir: str = ".sync_temp",
-        target_folder_id: str = "root",
+        target_folder: str = "root",
         on_duplicate: str = "skip",
         console: Console | None = None,
+        direction: SyncDirection = SyncDirection.ONEDRIVE_TO_GDRIVE,
     ):
         if on_duplicate not in self.DUPLICATE_MODES:
             raise ValueError(f"on_duplicate must be one of {self.DUPLICATE_MODES}")
         self._onedrive = onedrive
         self._gdrive = gdrive
         self._temp_dir = temp_dir
-        self._target_folder_id = target_folder_id
+        self._target_folder = target_folder
         self._on_duplicate = on_duplicate
         self._console = console
+        self._direction = direction
+
+    # ── direction-dispatching helpers ─────────────────────────────────
+
+    @property
+    def _source_name(self) -> str:
+        return "OneDrive" if self._direction == SyncDirection.ONEDRIVE_TO_GDRIVE else "Google Drive"
+
+    @property
+    def _dest_name(self) -> str:
+        return "Google Drive" if self._direction == SyncDirection.ONEDRIVE_TO_GDRIVE else "OneDrive"
+
+    def _list_source(self, source_folder, progress_callback=None):
+        if self._direction == SyncDirection.ONEDRIVE_TO_GDRIVE:
+            return self._onedrive.list_files(source_folder, progress_callback=progress_callback)
+        else:
+            return self._gdrive.list_files(source_folder, progress_callback=progress_callback)
+
+    def _download(self, file_meta, dest_dir, progress_callback=None):
+        if self._direction == SyncDirection.ONEDRIVE_TO_GDRIVE:
+            return self._onedrive.download_file(file_meta, dest_dir, progress_callback=progress_callback)
+        else:
+            return self._gdrive.download_file(file_meta, dest_dir, progress_callback=progress_callback)
+
+    def _ensure_dest_path(self, parent_dir):
+        if self._direction == SyncDirection.ONEDRIVE_TO_GDRIVE:
+            return self._gdrive.ensure_path(parent_dir, self._target_folder)
+        else:
+            return self._onedrive.ensure_path(parent_dir, self._target_folder)
+
+    def _find_existing(self, name, dest_parent):
+        if self._direction == SyncDirection.ONEDRIVE_TO_GDRIVE:
+            return self._gdrive.find_file(name, dest_parent)
+        else:
+            return self._onedrive.find_file(name, dest_parent)
+
+    def _upload(self, local_path, dest_parent, progress_callback=None):
+        if self._direction == SyncDirection.ONEDRIVE_TO_GDRIVE:
+            return self._gdrive.upload_file(local_path, dest_parent, progress_callback=progress_callback)
+        else:
+            return self._onedrive.upload_file(local_path, dest_parent, progress_callback=progress_callback)
+
+    def _update(self, file_id, local_path, progress_callback=None):
+        if self._direction == SyncDirection.ONEDRIVE_TO_GDRIVE:
+            return self._gdrive.update_file(file_id, local_path, progress_callback=progress_callback)
+        else:
+            return self._onedrive.update_file(file_id, local_path, progress_callback=progress_callback)
 
     # ── public API ───────────────────────────────────────────────────
 
-    def run(self, onedrive_folder: str = "/") -> SyncResult:
+    def run(self, source_folder: str = "/") -> SyncResult:
         """Execute a full sync cycle and return the result."""
         result = SyncResult()
         temp = Path(self._temp_dir)
         temp.mkdir(parents=True, exist_ok=True)
 
         try:
-            logger.info("Listing files in OneDrive folder: %s", onedrive_folder)
-            files = self._scan_with_progress(onedrive_folder)
+            logger.info("Listing files in %s folder: %s", self._source_name, source_folder)
+            files = self._scan_with_progress(source_folder)
             logger.info("Found %d file(s) to sync.", len(files))
 
             if self._console:
@@ -112,10 +166,12 @@ class SyncEngine:
 
     # ── scanning with progress ───────────────────────────────────────
 
-    def _scan_with_progress(self, onedrive_folder: str) -> list[dict]:
-        """List OneDrive files while showing a live scanning indicator."""
+    def _scan_with_progress(self, source_folder: str) -> list[dict]:
+        """List source files while showing a live scanning indicator."""
+        source_name = self._source_name
+
         if not self._console:
-            return list(self._onedrive.list_files(onedrive_folder))
+            return list(self._list_source(source_folder))
 
         scan_progress = Progress(
             SpinnerColumn(),
@@ -125,19 +181,19 @@ class SyncEngine:
         )
         with scan_progress:
             task = scan_progress.add_task(
-                "Scanning OneDrive — 0 files found", folder="", total=None
+                f"Scanning {source_name} \u2014 0 files found", folder="", total=None
             )
 
             def on_file_found(count: int, folder: str) -> None:
                 short_folder = folder if len(folder) <= 60 else "..." + folder[-57:]
                 scan_progress.update(
                     task,
-                    description=f"Scanning OneDrive — {count} files found",
+                    description=f"Scanning {source_name} \u2014 {count} files found",
                     folder=short_folder,
                 )
 
-            files = list(self._onedrive.list_files(
-                onedrive_folder, progress_callback=on_file_found
+            files = list(self._list_source(
+                source_folder, progress_callback=on_file_found
             ))
 
         return files
@@ -212,14 +268,14 @@ class SyncEngine:
         rel_path = file_meta["path"]
         size_str = format_size(file_size) if file_size else ""
 
-        # 1. Resolve destination folder in Google Drive
-        # Use PurePosixPath because OneDrive paths always use forward slashes,
+        # 1. Resolve destination folder
+        # Use PurePosixPath because source paths always use forward slashes,
         # but pathlib.Path converts to backslashes on Windows.
         parent_dir = str(PurePosixPath(rel_path).parent).lstrip("/")
-        gdrive_parent = self._gdrive.ensure_path(parent_dir, self._target_folder_id)
+        dest_parent = self._ensure_dest_path(parent_dir)
 
-        # 2. Check if file already exists in Google Drive
-        existing = self._gdrive.find_file(file_meta["name"], gdrive_parent)
+        # 2. Check if file already exists at destination
+        existing = self._find_existing(file_meta["name"], dest_parent)
         if existing:
             if self._on_duplicate == "skip":
                 logger.info("SKIP (already exists): %s", rel_path)
@@ -228,7 +284,7 @@ class SyncEngine:
             elif self._on_duplicate == "overwrite":
                 logger.info("File exists, will overwrite: %s", rel_path)
 
-        # 3. Download from OneDrive
+        # 3. Download from source
         dl_callback = None
         file_task = None
         if file_progress and file_size:
@@ -239,7 +295,7 @@ class SyncEngine:
                 file_progress.update(_task, completed=downloaded)
         logger.info("[1/3] Downloading: %s (%s)", rel_path, size_str)
 
-        local_path = self._onedrive.download_file(
+        local_path = self._download(
             file_meta, str(temp), progress_callback=dl_callback
         )
         result.transferred.append(rel_path)
@@ -248,7 +304,7 @@ class SyncEngine:
         if file_progress and file_task is not None:
             file_progress.remove_task(file_task)
 
-        # 4. Upload (or overwrite) to Google Drive
+        # 4. Upload (or overwrite) to destination
         ul_callback = None
         if file_progress and file_size:
             file_task = file_progress.add_task(
@@ -259,13 +315,13 @@ class SyncEngine:
 
         if existing and self._on_duplicate == "overwrite":
             logger.info("[2/3] Overwriting: %s (%s)", rel_path, size_str)
-            uploaded = self._gdrive.update_file(
+            uploaded = self._update(
                 existing["id"], local_path, progress_callback=ul_callback
             )
         else:
             logger.info("[2/3] Uploading : %s (%s)", rel_path, size_str)
-            uploaded = self._gdrive.upload_file(
-                local_path, gdrive_parent, progress_callback=ul_callback
+            uploaded = self._upload(
+                local_path, dest_parent, progress_callback=ul_callback
             )
 
         if file_progress and file_task is not None:
@@ -283,16 +339,38 @@ class SyncEngine:
     # ── verification ─────────────────────────────────────────────────
 
     def _verify(self, local_path: Path, uploaded_meta: dict) -> bool:
+        """Compare local hash against the hash reported by the destination service."""
+        if self._direction == SyncDirection.ONEDRIVE_TO_GDRIVE:
+            return self._verify_gdrive(local_path, uploaded_meta)
+        else:
+            return self._verify_onedrive(local_path, uploaded_meta)
+
+    def _verify_gdrive(self, local_path: Path, uploaded_meta: dict) -> bool:
         """Compare local MD5 against the MD5 Google Drive computed on upload."""
         gdrive_md5 = uploaded_meta.get("md5Checksum")
         if not gdrive_md5:
             gdrive_md5 = self._gdrive.get_file_md5(uploaded_meta["id"])
         if not gdrive_md5:
             logger.warning(
-                "Google Drive did not return an MD5 for %s – skipping verification.",
+                "Google Drive did not return an MD5 for %s \u2013 skipping verification.",
                 local_path.name,
             )
             return True
 
         local_md5 = GDriveClient.compute_local_md5(local_path)
         return local_md5 == gdrive_md5
+
+    def _verify_onedrive(self, local_path: Path, uploaded_meta: dict) -> bool:
+        """Compare local SHA256 against the SHA256 OneDrive computed on upload."""
+        remote_sha256 = uploaded_meta.get("file", {}).get("hashes", {}).get("sha256Hash")
+        if not remote_sha256:
+            remote_sha256 = self._onedrive.get_file_sha256(uploaded_meta["id"])
+        if not remote_sha256:
+            logger.warning(
+                "OneDrive did not return a SHA256 for %s \u2013 skipping verification.",
+                local_path.name,
+            )
+            return True
+
+        local_sha256 = OneDriveClient.compute_sha256(local_path)
+        return local_sha256.upper() == remote_sha256.upper()
