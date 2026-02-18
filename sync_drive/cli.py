@@ -1,4 +1,4 @@
-"""CLI entry point for OneDrive -> Google Drive sync."""
+"""CLI entry point for OneDrive <-> Google Drive sync."""
 
 from __future__ import annotations
 
@@ -18,24 +18,32 @@ from rich.text import Text
 
 from sync_drive.gdrive_client import GDriveClient
 from sync_drive.onedrive_client import OneDriveClient
-from sync_drive.sync_engine import SyncEngine, format_size
+from sync_drive.sync_engine import SyncDirection, SyncEngine, format_size
 
 LOG_DIR = "logs"
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Sync files from OneDrive to Google Drive with verification."
+        description="Sync files between OneDrive and Google Drive with verification."
+    )
+    parser.add_argument(
+        "--direction",
+        choices=("onedrive-to-gdrive", "gdrive-to-onedrive"),
+        default=os.getenv("SYNC_DIRECTION", "onedrive-to-gdrive"),
+        help="Sync direction (default: onedrive-to-gdrive)",
     )
     parser.add_argument(
         "--onedrive-folder",
         default=os.getenv("ONEDRIVE_SYNC_FOLDER", "/"),
-        help="OneDrive folder to sync (default: root /)",
+        help="OneDrive folder path "
+             "(source for onedrive-to-gdrive, destination for gdrive-to-onedrive; default: /)",
     )
     parser.add_argument(
         "--gdrive-folder-id",
         default=os.getenv("GOOGLE_DRIVE_TARGET_FOLDER", "root"),
-        help="Google Drive destination folder ID (default: root)",
+        help="Google Drive folder ID "
+             "(destination for onedrive-to-gdrive, source for gdrive-to-onedrive; default: root)",
     )
     parser.add_argument(
         "--temp-dir",
@@ -46,7 +54,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--on-duplicate",
         choices=("skip", "overwrite", "duplicate"),
         default="skip",
-        help="How to handle files that already exist in Google Drive: "
+        help="How to handle files that already exist at the destination: "
              "skip (default), overwrite, or duplicate",
     )
     parser.add_argument(
@@ -153,6 +161,7 @@ def _print_dry_run(console: Console, files: list[dict]) -> None:
 def main() -> int:
     load_dotenv()
     args = _build_parser().parse_args()
+    direction = SyncDirection(args.direction)
 
     # ── console setup ────────────────────────────────────────────────
     use_color = sys.stdout.isatty() and not args.no_color and not os.getenv("NO_COLOR")
@@ -188,30 +197,43 @@ def main() -> int:
     )
     gdrive = GDriveClient(credentials_file=credentials_file)
 
+    # ── determine source / destination based on direction ────────────
+    if direction == SyncDirection.ONEDRIVE_TO_GDRIVE:
+        source_folder = args.onedrive_folder
+        target_folder = args.gdrive_folder_id
+        panel_text = "OneDrive -> Google Drive Sync"
+    else:
+        source_folder = args.gdrive_folder_id
+        target_folder = args.onedrive_folder
+        panel_text = "Google Drive -> OneDrive Sync"
+
     # ── dry-run mode ─────────────────────────────────────────────────
     if args.dry_run:
-        logging.info("Dry-run mode: listing files without transferring.")
-        files = onedrive.list_files(args.onedrive_folder)
+        logging.info("Dry-run mode (%s): listing files without transferring.", args.direction)
+        if direction == SyncDirection.ONEDRIVE_TO_GDRIVE:
+            files = list(onedrive.list_files(source_folder))
+        else:
+            files = list(gdrive.list_files(source_folder))
         _print_dry_run(console, files)
         return 0
 
     # ── run sync ─────────────────────────────────────────────────────
-    console.print(
-        Panel("OneDrive -> Google Drive Sync", style="bold blue", padding=(0, 2))
-    )
+    console.print(Panel(panel_text, style="bold blue", padding=(0, 2)))
+    logging.info("Direction: %s", args.direction)
     logging.info("Duplicate mode: %s", args.on_duplicate)
 
     engine = SyncEngine(
         onedrive=onedrive,
         gdrive=gdrive,
         temp_dir=args.temp_dir,
-        target_folder_id=args.gdrive_folder_id,
+        target_folder=target_folder,
         on_duplicate=args.on_duplicate,
         console=console if use_color else None,
+        direction=direction,
     )
 
     start = time.monotonic()
-    result = engine.run(onedrive_folder=args.onedrive_folder)
+    result = engine.run(source_folder=source_folder)
     elapsed = time.monotonic() - start
 
     _print_summary(console, result, elapsed, log_filename)

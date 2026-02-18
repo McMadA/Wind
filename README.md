@@ -1,12 +1,13 @@
-# Wind – OneDrive to Google Drive Sync
+# Wind – OneDrive <-> Google Drive Sync
 
-Automatically moves files from OneDrive to Google Drive and verifies every
-transfer using MD5 checksums.
+Sync files between OneDrive and Google Drive in either direction, with
+checksum verification for every transfer.
 
 ## Features
 
-- **Recursive sync** – syncs all files and folders from a OneDrive directory
-- **MD5 verification** – every upload is verified against Google Drive's checksum
+- **Bidirectional sync** – OneDrive to Google Drive *or* Google Drive to OneDrive
+- **Recursive sync** – syncs all files and folders from the source directory
+- **Checksum verification** – MD5 (Google Drive) or SHA256 (OneDrive) verification after each upload
 - **Progress bars** – real-time download/upload progress with transfer speeds
 - **Colored output** – structured, color-coded log messages in the terminal
 - **Dry-run mode** – preview which files would be synced before transferring
@@ -15,10 +16,10 @@ transfer using MD5 checksums.
 
 ## How it works
 
-1. Lists all files in the specified OneDrive folder (recursively).
+1. Lists all files in the specified source folder (recursively).
 2. Downloads each file to a local temp directory.
-3. Recreates the folder structure in Google Drive and uploads the file.
-4. Compares the local MD5 against the MD5 reported by Google Drive.
+3. Recreates the folder structure at the destination and uploads the file.
+4. Verifies the upload using the destination's checksum (MD5 for Google Drive, SHA256 for OneDrive).
 5. Reports a summary of transferred, verified, and failed files.
 
 ## Prerequisites
@@ -38,7 +39,7 @@ transfer using MD5 checksums.
    - **Redirect URI**: select **Public client/native (mobile & desktop)** and enter `http://localhost:8400`
 3. Click **Register**. On the overview page, copy the **Application (client) ID** — this is your `ONEDRIVE_CLIENT_ID`.
 4. In the left sidebar go to **Certificates & secrets** > **Client secrets** > **New client secret**. Copy the secret **Value** (not the ID) — this is your `ONEDRIVE_CLIENT_SECRET`.
-5. In **API permissions**, make sure **Microsoft Graph > Files.Read** (delegated) is listed. Click **Add a permission** > **Microsoft Graph** > **Delegated permissions** > search for `Files.Read` and `Files.Read.All`, then add them.
+5. In **API permissions**, click **Add a permission** > **Microsoft Graph** > **Delegated permissions** > search for `Files.ReadWrite` and `Files.ReadWrite.All`, then add them.
 
 ### Google Drive
 
@@ -56,7 +57,7 @@ transfer using MD5 checksums.
 
 ### Finding your Google Drive folder ID
 
-If you want to sync into a specific Google Drive folder instead of the root:
+If you want to sync from/into a specific Google Drive folder instead of the root:
 
 1. Open the folder in [Google Drive](https://drive.google.com) in your browser.
 2. The URL will look like: `https://drive.google.com/drive/folders/1aBcDeFgHiJkLmNoPqRsTuVwXyZ`
@@ -77,20 +78,47 @@ cp .env.example .env
 #    (credentials.json from the Google Cloud Console step above)
 ```
 
+## Upgrading from v0.2
+
+v0.3 changes the OAuth scopes for both Google Drive and OneDrive. After
+upgrading you must re-authenticate by deleting the cached token files:
+
+```bash
+rm -f token.json onedrive_token_cache.bin
+```
+
+The next run will prompt you to sign in again.
+
 ## Usage
 
 ```bash
+# ── OneDrive to Google Drive (default) ──
+
 # Sync everything in OneDrive root to Google Drive root
 python -m sync_drive.cli
 
 # Sync a specific OneDrive folder into a specific Google Drive folder
 python -m sync_drive.cli --onedrive-folder /Documents --gdrive-folder-id <folder-id>
 
+# ── Google Drive to OneDrive ──
+
+# Sync everything in Google Drive root to OneDrive root
+python -m sync_drive.cli --direction gdrive-to-onedrive
+
+# Sync a specific Google Drive folder into a specific OneDrive folder
+python -m sync_drive.cli --direction gdrive-to-onedrive --gdrive-folder-id <folder-id> --onedrive-folder /Backup
+
+# ── Common options ──
+
 # Preview files without transferring (dry run)
 python -m sync_drive.cli --dry-run
+python -m sync_drive.cli --direction gdrive-to-onedrive --dry-run
 
 # Verbose output
 python -m sync_drive.cli -v
+
+# Overwrite existing files instead of skipping
+python -m sync_drive.cli --on-duplicate overwrite
 
 # Disable colored output and progress bars
 python -m sync_drive.cli --no-color
@@ -100,20 +128,24 @@ python -m sync_drive.cli --no-color
 
 All options can be set via environment variables (`.env`) or CLI flags:
 
-| Env variable                 | CLI flag              | Default           |
-| ---------------------------- | --------------------- | ----------------- |
-| `ONEDRIVE_CLIENT_ID`         | –                     | *(required)*      |
-| `ONEDRIVE_CLIENT_SECRET`     | –                     | *(required)*      |
-| `ONEDRIVE_TENANT_ID`         | –                     | `common`          |
-| `ONEDRIVE_SYNC_FOLDER`       | `--onedrive-folder`   | `/`               |
-| `GOOGLE_CREDENTIALS_FILE`    | –                     | `credentials.json`|
-| `GOOGLE_DRIVE_TARGET_FOLDER` | `--gdrive-folder-id`  | `root`            |
-| `TEMP_DIR`                   | `--temp-dir`          | `.sync_temp`      |
-| –                            | `--on-duplicate`      | `skip`            |
-| –                            | `--dry-run`           | off               |
-| –                            | `--no-color`          | off               |
-| –                            | `--verbose` / `-v`    | off               |
-| `NO_COLOR`                   | –                     | *(unset)*         |
+| Env variable                 | CLI flag              | Default              |
+| ---------------------------- | --------------------- | -------------------- |
+| `ONEDRIVE_CLIENT_ID`         | –                     | *(required)*         |
+| `ONEDRIVE_CLIENT_SECRET`     | –                     | *(required)*         |
+| `ONEDRIVE_TENANT_ID`         | –                     | `common`             |
+| `SYNC_DIRECTION`             | `--direction`         | `onedrive-to-gdrive` |
+| `ONEDRIVE_SYNC_FOLDER`       | `--onedrive-folder`   | `/`                  |
+| `GOOGLE_CREDENTIALS_FILE`    | –                     | `credentials.json`   |
+| `GOOGLE_DRIVE_TARGET_FOLDER` | `--gdrive-folder-id`  | `root`               |
+| `TEMP_DIR`                   | `--temp-dir`          | `.sync_temp`         |
+| –                            | `--on-duplicate`      | `skip`               |
+| –                            | `--dry-run`           | off                  |
+| –                            | `--no-color`          | off                  |
+| –                            | `--verbose` / `-v`    | off                  |
+| `NO_COLOR`                   | –                     | *(unset)*            |
+
+The `--onedrive-folder` and `--gdrive-folder-id` arguments swap roles depending
+on the direction: one is the source and the other is the destination.
 
 Set the `NO_COLOR` environment variable to any value to disable colored output
 (follows the [no-color.org](https://no-color.org/) convention).
