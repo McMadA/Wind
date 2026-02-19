@@ -1,9 +1,15 @@
-# Wind – OneDrive <-> Google Drive Sync
+# Wind – Cloud Storage Sync Tools
 
-Sync files between OneDrive and Google Drive in either direction, with
-checksum verification for every transfer.
+A collection of sync scripts for moving files between cloud storage services.
 
-## Features
+- **OneDrive ↔ Google Drive** – bidirectional sync with checksum verification
+- **Google Drive → Google Photos** – multi-threaded bulk upload with dedup
+
+---
+
+## Tool 1 – OneDrive ↔ Google Drive Sync (`sync_drive/`)
+
+### Features
 
 - **Bidirectional sync** – OneDrive to Google Drive *or* Google Drive to OneDrive
 - **Recursive sync** – syncs all files and folders from the source directory
@@ -14,7 +20,7 @@ checksum verification for every transfer.
 - **Duplicate handling** – skip, overwrite, or create copies of existing files
 - **Audit log** – every run is saved to a timestamped log file in `logs/`
 
-## How it works
+### How it works
 
 1. Lists all files in the specified source folder (recursively).
 2. Downloads each file to a local temp directory.
@@ -22,15 +28,15 @@ checksum verification for every transfer.
 4. Verifies the upload using the destination's checksum (MD5 for Google Drive, SHA256 for OneDrive).
 5. Reports a summary of transferred, verified, and failed files.
 
-## Prerequisites
+### Prerequisites
 
 - Python 3.11+
 - A **Microsoft Azure** app registration (for OneDrive / Microsoft Graph access)
 - A **Google Cloud** project with the Drive API enabled and an OAuth 2.0 client
 
-## Getting credentials
+### Getting credentials
 
-### OneDrive (Microsoft Azure)
+#### OneDrive (Microsoft Azure)
 
 1. Go to the [Azure App Registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) portal and sign in.
 2. Click **New registration**.
@@ -41,7 +47,7 @@ checksum verification for every transfer.
 4. In the left sidebar go to **Certificates & secrets** > **Client secrets** > **New client secret**. Copy the secret **Value** (not the ID) — this is your `ONEDRIVE_CLIENT_SECRET`.
 5. In **API permissions**, click **Add a permission** > **Microsoft Graph** > **Delegated permissions** > search for `Files.ReadWrite` and `Files.ReadWrite.All`, then add them.
 
-### Google Drive
+#### Google Drive
 
 1. Go to the [Google Cloud Console](https://console.cloud.google.com/) and create a new project (or select an existing one).
 2. Enable the **Google Drive API**: go to **APIs & Services** > **Library**, search for "Google Drive API", and click **Enable**.
@@ -55,7 +61,7 @@ checksum verification for every transfer.
    - **Name**: choose any name
 5. Click **Download JSON** and save the file as `credentials.json` in the project root.
 
-### Finding your Google Drive folder ID
+#### Finding your Google Drive folder ID
 
 If you want to sync from/into a specific Google Drive folder instead of the root:
 
@@ -63,7 +69,7 @@ If you want to sync from/into a specific Google Drive folder instead of the root
 2. The URL will look like: `https://drive.google.com/drive/folders/1aBcDeFgHiJkLmNoPqRsTuVwXyZ`
 3. The last part of the URL (`1aBcDeFgHiJkLmNoPqRsTuVwXyZ`) is the folder ID — use it as `GOOGLE_DRIVE_TARGET_FOLDER` in your `.env`.
 
-## Setup
+### Setup
 
 ```bash
 # 1. Install dependencies
@@ -78,7 +84,7 @@ cp .env.example .env
 #    (credentials.json from the Google Cloud Console step above)
 ```
 
-## Upgrading from v0.2
+### Upgrading from v0.2
 
 v0.3 changes the OAuth scopes for both Google Drive and OneDrive. After
 upgrading you must re-authenticate by deleting the cached token files:
@@ -89,7 +95,7 @@ rm -f token.json onedrive_token_cache.bin
 
 The next run will prompt you to sign in again.
 
-## Usage
+### Usage
 
 ```bash
 # ── OneDrive to Google Drive (default) ──
@@ -124,7 +130,7 @@ python -m sync_drive.cli --on-duplicate overwrite
 python -m sync_drive.cli --no-color
 ```
 
-## Configuration
+### Configuration
 
 All options can be set via environment variables (`.env`) or CLI flags:
 
@@ -150,7 +156,7 @@ on the direction: one is the source and the other is the destination.
 Set the `NO_COLOR` environment variable to any value to disable colored output
 (follows the [no-color.org](https://no-color.org/) convention).
 
-## Project structure
+### Project structure
 
 ```
 sync_drive/
@@ -160,3 +166,177 @@ sync_drive/
   gdrive_client.py      # Google Drive API wrapper
   sync_engine.py        # Orchestrator with progress bars and checksum verification
 ```
+
+---
+
+## Tool 2 – Google Drive → Google Photos Sync (`drive2photos/`)
+
+Bulk-uploads photos and videos from Google Drive directly into your Google
+Photos library. Designed for large libraries — it resumes interrupted runs,
+skips files you've already uploaded, and processes multiple files in parallel.
+
+### Features
+
+- **Multi-threaded uploads** – configurable worker count (`--workers N`, default 5)
+- **Three dedup modes** – `filename`, `hash`, or `filename+hash` to avoid re-uploading
+- **Photos library cache** – scans your Photos library once and caches results locally; use `--refresh-cache` to force a rescan
+- **Resumable** – progress is saved to `uploaded_ids.json` every N files, so a crash or Ctrl+C loses at most a handful of uploads
+- **Date filter** – `--since YYYY-MM-DD` to only process recently modified files
+- **Dry-run mode** – preview what would be uploaded without touching Photos
+- **Metadata preserved** – original Drive filename and timestamps stored in the Photos item description
+- **Interactive folder browser** – navigate your Drive hierarchy and pick one or more folders, or pass `--folder ID` / `--all` to skip the prompt
+
+### Prerequisites
+
+```bash
+pip install google-api-python-client google-auth google-auth-oauthlib requests
+```
+
+You will need a Google Cloud project with **two** APIs enabled:
+
+1. **Google Drive API** – to read your files
+2. **Google Photos Library API** – to upload them
+
+#### Setting up Google Cloud credentials
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/) and create or select a project.
+2. Go to **APIs & Services** > **Library** and enable both:
+   - **Google Drive API**
+   - **Photos Library API**
+3. Go to **APIs & Services** > **OAuth consent screen**.
+   - Choose **External**, fill in the required fields, and click **Save and Continue**.
+   - On the **Scopes** step add:
+     - `https://www.googleapis.com/auth/drive.readonly`
+     - `https://www.googleapis.com/auth/photoslibrary.readonly`
+     - `https://www.googleapis.com/auth/photoslibrary.appendonly`
+   - Add your Google account under **Test users**.
+4. Go to **APIs & Services** > **Credentials** > **Create Credentials** > **OAuth client ID**.
+   - **Application type**: Desktop app
+5. Click **Download JSON** and save it as `client_secret.json` in the `drive2photos/` directory.
+
+### State files (auto-created)
+
+| File | Purpose |
+|---|---|
+| `client_secret.json` | OAuth credentials — you supply this |
+| `token.json` | Cached OAuth token — auto-refreshed |
+| `uploaded_ids.json` | Drive file IDs that were successfully uploaded |
+| `uploaded_hashes.json` | SHA-256 hashes of uploaded content (hash dedup) |
+| `photos_filename_cache.json` | Cached Photos library filenames (filename dedup) |
+
+### Usage
+
+```bash
+cd drive2photos
+
+# Interactive folder picker (default)
+python drive_to_photos_sync.py
+
+# Sync a specific folder by Drive folder ID
+python drive_to_photos_sync.py --folder DRIVE_FOLDER_ID
+
+# Sync everything in your entire Drive
+python drive_to_photos_sync.py --all --workers 8
+
+# Most thorough dedup (checks filename AND content hash)
+python drive_to_photos_sync.py --dedup-mode filename+hash
+
+# Only files modified since a given date
+python drive_to_photos_sync.py --all --since 2024-06-01
+
+# Preview what would be uploaded without uploading
+python drive_to_photos_sync.py --dry-run --all
+
+# Force a fresh scan of your Photos library
+python drive_to_photos_sync.py --refresh-cache
+```
+
+### Dedup modes
+
+| Mode | How it works | Speed |
+|---|---|---|
+| `none` | Always upload (Photos may end up with duplicates) | Fastest |
+| `filename` *(default)* | Skip if the filename already exists anywhere in Photos | Fast |
+| `hash` | Download first, compute SHA-256, skip if same content was uploaded before | Slower |
+| `filename+hash` | Skip if *either* filename or hash matches | Most thorough |
+
+### CLI reference
+
+| Flag | Default | Description |
+|---|---|---|
+| `--folder ID` | – | Drive folder ID to sync |
+| `--all` | – | Sync all media in your entire Drive |
+| `--since YYYY-MM-DD` | – | Only files modified after this date |
+| `--workers N` | `5` | Number of parallel upload threads |
+| `--dedup-mode MODE` | `filename` | Dedup strategy (see table above) |
+| `--skip-dedup` | off | Alias for `--dedup-mode none` |
+| `--refresh-cache` | off | Force full Photos library rescan |
+| `--save-every N` | `25` | Save progress to disk every N uploads |
+| `--limit N` | – | Process at most N files (useful for testing) |
+| `--dry-run` | off | Show what would happen without uploading |
+
+---
+
+## Optional – Run on a Free Azure VM (`free-vm.bicep`)
+
+Syncing a large library can take hours. The `free-vm.bicep` template spins up
+a **Standard_B1s** Ubuntu VM (eligible for Azure's 750 free hours/month on new
+accounts) so you can kick off the sync, close your laptop, and let Azure handle it.
+
+### What the template creates
+
+- Ubuntu 24.04 LTS VM (`Standard_B1s`, 1 vCPU / 1 GB RAM)
+- 64 GB Premium SSD OS disk (covered by the free tier's 2 × 64 GB disk allowance)
+- Virtual network, subnet, public IP, and NIC
+- Network security group with SSH (port 22) open
+
+### Deploy
+
+```bash
+# 1. Log in and set your subscription
+az login
+az account set --subscription "<your-subscription-id>"
+
+# 2. Create a resource group
+az group create --name wind-sync-rg --location eastus
+
+# 3. Deploy the template (paste your SSH public key when prompted)
+az deployment group create \
+  --resource-group wind-sync-rg \
+  --template-file free-vm.bicep \
+  --parameters sshPublicKey="$(cat ~/.ssh/id_rsa.pub)"
+
+# 4. Grab the public IP from the deployment output and SSH in
+ssh azureuser@<public-ip>
+```
+
+> **Tip:** If you don't have an SSH key yet, generate one with `ssh-keygen -t rsa -b 4096`.
+
+### Run the sync on the VM
+
+```bash
+# On the VM — install Python and dependencies
+sudo apt update && sudo apt install -y python3-pip
+pip3 install google-api-python-client google-auth google-auth-oauthlib requests
+
+# Upload your credentials
+scp client_secret.json azureuser@<public-ip>:~/drive2photos/
+scp drive_to_photos_sync.py azureuser@<public-ip>:~/drive2photos/
+
+# Start the sync in a tmux session so it survives SSH disconnects
+sudo apt install -y tmux
+tmux new -s sync
+cd ~/drive2photos
+python3 drive_to_photos_sync.py --all --workers 5
+
+# Detach from tmux: Ctrl+B then D
+# Re-attach later:  tmux attach -t sync
+```
+
+### Clean up when done
+
+```bash
+az group delete --name wind-sync-rg --yes --no-wait
+```
+
+This deletes the VM and all associated resources, stopping any further charges.
