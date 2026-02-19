@@ -4,7 +4,7 @@ Google Drive → Google Photos Sync Script  (v2)
 
 Features
 --------
-- Multi-threaded uploads (--workers N, default 5)
+- Multi-threaded uploads (--workers N, default 10)
 - Three dedup modes  : filename | hash | filename+hash
 - Photos library cache: avoids re-scanning on every run (--refresh-cache to force)
 - Metadata preserved : original filename + Drive timestamps stored in description
@@ -109,7 +109,7 @@ SUPPORTED_MIME_TYPES = [
     "video/mpeg", "video/3gpp",
 ]
 
-DEFAULT_WORKERS = 5
+DEFAULT_WORKERS = 10
 DEFAULT_SAVE_EVERY = 25
 
 # Retry config for transient HTTP errors (rate limits, 5xx)
@@ -408,6 +408,18 @@ def _get_drive_service(creds: Credentials):
     return _thread_local.drive
 
 
+def _get_session() -> requests.Session:
+    """Return the thread-local requests.Session, creating it on first access.
+
+    Reusing a Session keeps the underlying TCP/TLS connection alive across the
+    two Photos API calls per file (upload bytes + batchCreate), eliminating one
+    TLS handshake per upload on average.
+    """
+    if not hasattr(_thread_local, "session"):
+        _thread_local.session = requests.Session()
+    return _thread_local.session
+
+
 def _refresh_token_if_needed(creds: Credentials) -> None:
     """Thread-safely refresh the OAuth access token when it has expired."""
     with _creds_refresh_lock:
@@ -653,7 +665,7 @@ def photos_upload_bytes(
     Retries up to MAX_RETRIES times on rate-limit (HTTP 429) responses.
     """
     for attempt in range(MAX_RETRIES):
-        resp = requests.post(
+        resp = _get_session().post(
             PHOTOS_UPLOAD_URL,
             headers={
                 "Authorization": f"Bearer {token}",
@@ -710,7 +722,7 @@ def photos_create_item(
         item["description"] = description[:1000]
 
     for attempt in range(MAX_RETRIES):
-        resp = requests.post(
+        resp = _get_session().post(
             PHOTOS_BATCH_CREATE_URL,
             headers={
                 "Authorization": f"Bearer {token}",
@@ -759,6 +771,177 @@ def _tlog(msg: str) -> None:
 
 
 # ============================================================
+# Batch collector  (coalesces batchCreate calls across workers)
+# ============================================================
+
+class BatchCollector:
+    """
+    Collects upload tokens from worker threads and fires them to the Photos
+    API in batches of up to 50, which is the maximum the batchCreate endpoint
+    accepts per request.
+
+    A dedicated daemon thread drives flushing:
+      - Immediately when the buffer reaches 50 items.
+      - After at most 3 seconds of inactivity (so the tail of a run is never
+        stuck waiting).
+
+    Workers call enqueue() — which is non-blocking — and return "uploaded"
+    optimistically.  Per-item success/failure is recorded asynchronously by
+    _do_flush() once the API responds.
+
+    Call drain() after the thread pool has finished to flush any remaining
+    items before printing the summary.
+    """
+
+    _BATCH_SIZE = 50
+    _FLUSH_INTERVAL = 3.0  # seconds
+
+    def __init__(
+        self,
+        get_token: Callable[[], str],
+        state: "SyncState",
+        photos_cache: Optional["PhotosFilenameCache"],
+    ) -> None:
+        self._get_token = get_token
+        self._state = state
+        self._photos_cache = photos_cache
+
+        self._lock = threading.Lock()
+        self._buffer: List[Dict] = []
+        self._flush_event = threading.Event()
+        self._stopped = False
+
+        self._thread = threading.Thread(target=self._flush_loop, daemon=True)
+        self._thread.start()
+
+    # ---- Public API ----
+
+    def enqueue(
+        self,
+        upload_token: str,
+        filename: str,
+        description: Optional[str],
+        file_id: str,
+        file_hash: Optional[str],
+        size_mb: float,
+        prefix: str,
+    ) -> None:
+        """Add one item to the batch buffer (thread-safe, non-blocking)."""
+        with self._lock:
+            self._buffer.append({
+                "upload_token": upload_token,
+                "filename": filename,
+                "description": description,
+                "file_id": file_id,
+                "file_hash": file_hash,
+                "size_mb": size_mb,
+                "prefix": prefix,
+            })
+            if len(self._buffer) >= self._BATCH_SIZE:
+                self._flush_event.set()
+
+    def drain(self) -> None:
+        """Flush all remaining items; blocks until complete.  Call once, after
+        the thread pool exits and before printing the final summary."""
+        self._stopped = True
+        self._flush_event.set()
+        self._thread.join(timeout=60)
+        # Safety net: flush anything left if the thread exited early
+        self._do_flush()
+
+    # ---- Internal ----
+
+    def _flush_loop(self) -> None:
+        """Daemon thread: flush on signal or every _FLUSH_INTERVAL seconds."""
+        while not self._stopped:
+            self._flush_event.wait(timeout=self._FLUSH_INTERVAL)
+            self._flush_event.clear()
+            self._do_flush()
+        # One final flush after stop is requested
+        self._do_flush()
+
+    def _do_flush(self) -> None:
+        """Pop up to _BATCH_SIZE items and send them to batchCreate."""
+        with self._lock:
+            if not self._buffer:
+                return
+            batch = self._buffer[: self._BATCH_SIZE]
+            self._buffer = self._buffer[self._BATCH_SIZE :]
+
+        # Build the request body
+        new_media_items = []
+        for item in batch:
+            media_item: Dict = {
+                "simpleMediaItem": {
+                    "uploadToken": item["upload_token"],
+                    "fileName": item["filename"],
+                }
+            }
+            if item["description"]:
+                media_item["description"] = item["description"][:1000]
+            new_media_items.append(media_item)
+
+        token = self._get_token()
+
+        for attempt in range(MAX_RETRIES):
+            resp = _get_session().post(
+                PHOTOS_BATCH_CREATE_URL,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-type": "application/json",
+                },
+                json={"newMediaItems": new_media_items},
+            )
+
+            if resp.status_code == 429:
+                wait = RETRY_BASE_DELAY * (2 ** attempt)
+                _tlog(
+                    f"  Rate-limited (batch create, {len(batch)} items) "
+                    f"— retrying in {wait:.0f} s …"
+                )
+                time.sleep(wait)
+                continue
+
+            if resp.status_code != 200:
+                _tlog(
+                    f"  batchCreate failed (HTTP {resp.status_code}): "
+                    f"{resp.text[:120]}"
+                )
+                for _ in batch:
+                    self._state.record_failure()
+                return
+
+            results = resp.json().get("newMediaItemResults", [])
+            for i, result in enumerate(results):
+                if i >= len(batch):
+                    break
+                item = batch[i]
+                status = result.get("status", {})
+                ok = status.get("code", -1) == 0 or "success" in status.get(
+                    "message", ""
+                ).lower()
+                if ok:
+                    self._state.record_success(item["file_id"], item["file_hash"])
+                    if self._photos_cache:
+                        self._photos_cache.add(item["filename"])
+                    _tlog(
+                        f"{item['prefix']} OK  {item['filename']}"
+                        f"  ({item['size_mb']:.1f} MB)"
+                    )
+                else:
+                    _tlog(
+                        f"{item['prefix']} FAIL (create item)  {item['filename']}"
+                        f": {status.get('message', '')}"
+                    )
+                    self._state.record_failure()
+            return
+
+        # All retries exhausted
+        for _ in batch:
+            self._state.record_failure()
+
+
+# ============================================================
 # Per-file worker  (runs in a thread-pool thread)
 # ============================================================
 
@@ -770,6 +953,7 @@ def process_one_file(
     state: SyncState,
     photos_cache: Optional[PhotosFilenameCache],
     dedup_mode: str,
+    batch_collector: Optional[BatchCollector] = None,
 ) -> str:
     """
     Download one file from Drive and upload it to Google Photos.
@@ -845,6 +1029,14 @@ def process_one_file(
         _tlog(f"{prefix} FAIL (upload bytes)  {filename}")
         state.record_failure()
         return "failed"
+
+    if batch_collector is not None:
+        # Hand off to the batch collector — actual success/failure is recorded
+        # asynchronously once the batch fires.
+        batch_collector.enqueue(
+            upload_token, filename, description, file_id, file_hash, size_mb, prefix
+        )
+        return "uploaded"
 
     ok = photos_create_item(token, upload_token, filename, description)
     if ok:
@@ -1081,6 +1273,10 @@ Examples
     print(f"\nStarting sync with {args.workers} worker thread(s) …\n")
     start_time = time.monotonic()
 
+    # BatchCollector coalesces individual batchCreate calls into groups of 50,
+    # reducing API round-trips by up to 50×.
+    batch_collector = BatchCollector(lambda: creds.token, state, photos_cache)
+
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         # Submit all tasks upfront.  ThreadPoolExecutor queues them internally
         # and dispatches up to max_workers at a time — no manual chunking needed.
@@ -1094,6 +1290,7 @@ Examples
                 state,
                 photos_cache,
                 args.dedup_mode,
+                batch_collector,
             ): file["name"]
             for idx, file in enumerate(pending, 1)
         }
@@ -1112,6 +1309,9 @@ Examples
                 name = futures[future]
                 _tlog(f"  Unhandled exception for {name}: {exc}")
                 state.record_failure()
+
+    # Flush any upload tokens that haven't been sent yet
+    batch_collector.drain()
 
     # ----------------------------------------------------------------
     # Final save and summary

@@ -177,7 +177,7 @@ skips files you've already uploaded, and processes multiple files in parallel.
 
 ### Features
 
-- **Multi-threaded uploads** – configurable worker count (`--workers N`, default 5)
+- **Multi-threaded uploads** – configurable worker count (`--workers N`, default 10)
 - **Three dedup modes** – `filename`, `hash`, or `filename+hash` to avoid re-uploading
 - **Photos library cache** – scans your Photos library once and caches results locally; use `--refresh-cache` to force a rescan
 - **Resumable** – progress is saved to `uploaded_ids.json` every N files, so a crash or Ctrl+C loses at most a handful of uploads
@@ -251,6 +251,23 @@ python drive_to_photos_sync.py --dry-run --all
 python drive_to_photos_sync.py --refresh-cache
 ```
 
+### Performance tips
+
+| Goal | Command |
+|---|---|
+| First-time sync (no existing duplicates) | `python drive_to_photos_sync.py --all --workers 15 --skip-dedup --save-every 100` |
+| Fast with light dedup (filename only) | `python drive_to_photos_sync.py --all --workers 15 --dedup-mode filename --save-every 50` |
+| Incremental (only new/changed files) | `python drive_to_photos_sync.py --all --workers 15 --since 2025-01-01` |
+
+Key levers:
+
+- **`--workers N`** — default is 10; the Photos API comfortably supports 10–15 concurrent connections. Raising this is the single biggest throughput knob.
+- **`--skip-dedup`** — removes all hash computation and Photos library scanning. Safe on a first run where no duplicates can exist.
+- **`--save-every 100`** — reduces disk writes from the default (every 25 files) to every 100, cutting I/O overhead.
+- **`--since DATE`** — skips files that haven't changed since the given date; huge speedup for incremental runs.
+
+Uploads are sent to Photos in batches of up to 50 items per API request (the maximum the `batchCreate` endpoint accepts), which reduces API round-trips by up to 50× compared to one request per file.
+
 ### Dedup modes
 
 | Mode | How it works | Speed |
@@ -267,7 +284,7 @@ python drive_to_photos_sync.py --refresh-cache
 | `--folder ID` | – | Drive folder ID to sync |
 | `--all` | – | Sync all media in your entire Drive |
 | `--since YYYY-MM-DD` | – | Only files modified after this date |
-| `--workers N` | `5` | Number of parallel upload threads |
+| `--workers N` | `10` | Number of parallel upload threads |
 | `--dedup-mode MODE` | `filename` | Dedup strategy (see table above) |
 | `--skip-dedup` | off | Alias for `--dedup-mode none` |
 | `--refresh-cache` | off | Force full Photos library rescan |
@@ -327,7 +344,7 @@ scp drive_to_photos_sync.py azureuser@<public-ip>:~/drive2photos/
 sudo apt install -y tmux
 tmux new -s sync
 cd ~/drive2photos
-python3 drive_to_photos_sync.py --all --workers 5
+python3 drive_to_photos_sync.py --all --workers 10
 
 # Detach from tmux: Ctrl+B then D
 # Re-attach later:  tmux attach -t sync
