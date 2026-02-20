@@ -8,7 +8,7 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 
 from pyicloud import PyiCloudService
-from pyicloud.exceptions import PyiCloud2SARequiredError
+from pyicloud.exceptions import PyiCloud2FARequiredException
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +28,12 @@ class ICloudClient:
         self.api = PyiCloudService(apple_id, password, cookie_directory=cookie_directory)
 
         if self.api.requires_2fa:
-            print("
-  2FA Required for iCloud. Please check your devices.")
+            print("\n  2FA Required for iCloud. Please check your devices.")
             code = input("  Enter the code you received: ")
             result = self.api.validate_2fa_code(code)
             if not result:
                 raise RuntimeError("Failed to verify 2FA code")
-            print("  iCloud authentication successful.
-")
+            print("  iCloud authentication successful.\n")
 
     def _get_node(self, path: str):
         """Navigate to a specific path in iCloud Drive and return the node."""
