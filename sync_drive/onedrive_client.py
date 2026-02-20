@@ -357,6 +357,13 @@ class OneDriveClient:
                     result = chunk_resp.json()
         return result
 
+    def delete_file(self, item_id: str) -> None:
+        """Delete a file from OneDrive."""
+        url = f"{GRAPH_BASE}/me/drive/items/{item_id}"
+        resp = requests.delete(url, headers=self._headers(), timeout=30)
+        resp.raise_for_status()
+        logger.info("Deleted OneDrive file: %s", item_id)
+
     # ── verification ────────────────────────────────────────────────
 
     def verify_integrity(self, local_path: Path, uploaded_meta: dict) -> bool:

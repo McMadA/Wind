@@ -76,6 +76,7 @@ class SyncEngine:
         target_folder: str = "root",
         on_duplicate: str = "skip",
         console: Console | None = None,
+        move: bool = False,
     ):
         if on_duplicate not in self.DUPLICATE_MODES:
             raise ValueError(f"on_duplicate must be one of {self.DUPLICATE_MODES}")
@@ -87,6 +88,7 @@ class SyncEngine:
         self._target_folder = target_folder
         self._on_duplicate = on_duplicate
         self._console = console
+        self._move = move
 
     # ── generic helpers ──────────────────────────────────────────────
 
@@ -107,6 +109,20 @@ class SyncEngine:
 
     def _update(self, file_id, local_path, progress_callback=None):
         return self._dest_client.update_file(file_id, local_path, progress_callback=progress_callback)
+
+    def _delete_source(self, file_meta):
+        """Delete the file from source storage."""
+        try:
+            # GDrive/OneDrive use ID, iCloud uses the whole meta/node
+            if hasattr(self._source_client, 'delete_file'):
+                if self._source_name.lower() == 'icloud':
+                    self._source_client.delete_file(file_meta)
+                else:
+                    self._source_client.delete_file(file_meta["id"])
+            else:
+                logger.warning("Source client for %s does not support deletion.", self._source_name)
+        except Exception as exc:
+            logger.error("Failed to delete source file %s: %s", file_meta["name"], exc)
 
     # ── public API ───────────────────────────────────────────────────
 
@@ -299,6 +315,11 @@ class SyncEngine:
         if self._verify(local_path, uploaded):
             result.verified.append(rel_path)
             logger.info("  OK  %s", rel_path)
+            
+            # 6. Delete from source if move is enabled
+            if self._move:
+                logger.info("[4/4] Moving (Delete source): %s", rel_path)
+                self._delete_source(file_meta)
         else:
             result.failed.append(rel_path)
             logger.error("  FAIL checksum mismatch: %s", rel_path)

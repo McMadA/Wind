@@ -19,6 +19,7 @@ from rich.text import Text
 from sync_drive.gdrive_client import GDriveClient
 from sync_drive.onedrive_client import OneDriveClient
 from sync_drive.icloud_client import ICloudClient
+from sync_drive.gphotos_client import GooglePhotosClient
 from sync_drive.sync_engine import SyncEngine, format_size
 
 LOG_DIR = "logs"
@@ -26,17 +27,17 @@ LOG_DIR = "logs"
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Sync files between cloud storage services (OneDrive, Google Drive, iCloud) with verification."
+        description="Sync files between cloud storage services (OneDrive, Google Drive, iCloud, Google Photos) with verification."
     )
     parser.add_argument(
         "--source",
-        choices=("onedrive", "gdrive", "icloud"),
+        choices=("onedrive", "gdrive", "icloud", "gphotos"),
         default=os.getenv("SOURCE_SERVICE", "onedrive"),
         help="Source service (default: onedrive)",
     )
     parser.add_argument(
         "--dest",
-        choices=("onedrive", "gdrive", "icloud"),
+        choices=("onedrive", "gdrive", "icloud", "gphotos"),
         default=os.getenv("DEST_SERVICE", "gdrive"),
         help="Destination service (default: gdrive)",
     )
@@ -76,6 +77,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="List files that would be synced without transferring",
+    )
+    parser.add_argument(
+        "--move",
+        action="store_true",
+        help="Delete files from source after successful verification at destination",
     )
     return parser
 
@@ -201,6 +207,10 @@ def main() -> int:
                 raise ValueError("APPLE_ID and APPLE_PASSWORD must be set for iCloud.")
             return ICloudClient(apple_id, password)
         
+        elif service_name == "gphotos":
+            credentials_file = os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json")
+            return GooglePhotosClient(credentials_file=credentials_file)
+        
         else:
             raise ValueError(f"Unknown service: {service_name}")
 
@@ -237,6 +247,7 @@ def main() -> int:
         target_folder=target_folder,
         on_duplicate=args.on_duplicate,
         console=console if use_color else None,
+        move=args.move,
     )
 
     start = time.monotonic()

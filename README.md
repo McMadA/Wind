@@ -2,8 +2,8 @@
 
 A collection of sync scripts for moving files between cloud storage services.
 
-- **Cloud Drive Sync** – Generic sync between **OneDrive**, **Google Drive**, and **iCloud** with verification.
-- **Google Drive → Google Photos** – multi-threaded bulk upload with dedup.
+- **Cloud Drive Sync** – Generic sync between **OneDrive**, **Google Drive**, **iCloud**, and **Google Photos** with verification.
+- **Google Drive → Google Photos (legacy tool)** – multi-threaded bulk upload with dedup.
 
 ---
 
@@ -11,9 +11,9 @@ A collection of sync scripts for moving files between cloud storage services.
 
 ### Features
 
-- **Multi-service support** – Sync between any combination of **OneDrive**, **Google Drive**, and **iCloud Drive**.
+- **Multi-service support** – Sync between any combination of **OneDrive**, **Google Drive**, **iCloud Drive**, and **Google Photos**.
 - **Recursive sync** – syncs all files and folders from the source directory.
-- **Integrity verification** – Service-specific checksums (MD5 for GDrive, SHA256 for OneDrive) or file size (iCloud) verification after each upload.
+- **Integrity verification** – Service-specific checksums (MD5 for GDrive, SHA256 for OneDrive) or file size/cache (iCloud, GPhotos) verification after each upload.
 - **Progress bars** – real-time download/upload progress with transfer speeds.
 - **Colored output** – structured, color-coded log messages in the terminal.
 - **Dry-run mode** – preview which files would be synced before transferring.
@@ -112,8 +112,19 @@ The next run will prompt you to sign in again.
 # Sync from iCloud to Google Drive
 python -m sync_drive.cli --source icloud --dest gdrive --source-path /Photos --dest-path root
 
-# Sync from Google Drive to OneDrive
-python -m sync_drive.cli --source gdrive --dest onedrive --source-path <gdrive-folder-id> --dest-path /Backup
+# Sync from Google Drive to Google Photos
+python -m sync_drive.cli --source gdrive --dest gphotos --source-path <gdrive-folder-id>
+
+# Sync from OneDrive to Google Photos
+python -m sync_drive.cli --source onedrive --dest gphotos --source-path /Pictures
+
+# ── Moving files (Delete source after sync) ──
+
+# Move from iCloud to OneDrive
+python -m sync_drive.cli --source icloud --dest onedrive --source-path /Documents --dest-path /Backup --move
+
+# Move from OneDrive to iCloud
+python -m sync_drive.cli --source onedrive --dest icloud --source-path /Archive --dest-path / --move
 
 # ── Common options ──
 
@@ -141,14 +152,15 @@ All options can be set via environment variables (`.env`) or CLI flags:
 | `ONEDRIVE_TENANT_ID`         | –                     | `common`             |
 | `APPLE_ID`                   | –                     | *(for iCloud)*       |
 | `APPLE_PASSWORD`             | –                     | *(for iCloud)*       |
-| `SOURCE_SERVICE`             | `--source`            | `onedrive`           |
-| `DEST_SERVICE`               | `--dest`              | `gdrive`             |
+| `SOURCE_SERVICE`             | `--source`            | `onedrive, gdrive, icloud, gphotos` |
+| `DEST_SERVICE`               | `--dest`              | `onedrive, gdrive, icloud, gphotos` |
 | `SOURCE_PATH`                | `--source-path`       | `/`                  |
 | `DEST_PATH`                  | `--dest-path`         | `/`                  |
 | `GOOGLE_CREDENTIALS_FILE`    | –                     | `credentials.json`   |
 | `TEMP_DIR`                   | `--temp-dir`          | `.sync_temp`         |
 | –                            | `--on-duplicate`      | `skip`               |
 | –                            | `--dry-run`           | off                  |
+| –                            | `--move`              | off                  |
 | –                            | `--no-color`          | off                  |
 | –                            | `--verbose` / `-v`    | off                  |
 | `NO_COLOR`                   | –                     | *(unset)*            |

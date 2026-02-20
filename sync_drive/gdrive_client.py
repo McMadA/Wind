@@ -243,6 +243,11 @@ class GDriveClient:
         logger.debug("Overwritten %s  (id=%s)", local_path.name, response["id"])
         return response
 
+    def delete_file(self, file_id: str) -> None:
+        """Delete a file from Google Drive."""
+        self._service.files().delete(fileId=file_id).execute()
+        logger.info("Deleted Google Drive file: %s", file_id)
+
     # ── verification ────────────────────────────────────────────────
 
     def verify_integrity(self, local_path: Path, uploaded_meta: dict) -> bool:

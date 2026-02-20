@@ -172,6 +172,19 @@ class ICloudClient:
             
         return {"id": local_path.name, "name": local_path.name, "size": file_size}
 
+    def delete_file(self, file_meta: dict) -> None:
+        """Delete a file from iCloud."""
+        node = file_meta.get("node")
+        if not node:
+             node = self._get_node(file_meta["path"])
+        
+        # Depending on the pyicloud fork, .delete() or similar is used
+        if hasattr(node, 'delete'):
+            node.delete()
+            logger.info("Deleted iCloud file: %s", file_meta["name"])
+        else:
+            logger.warning("iCloud deletion not supported by current pyicloud version/node.")
+
     # ── verification ────────────────────────────────────────────────
 
     def verify_integrity(self, local_path: Path, uploaded_meta: dict) -> bool:
