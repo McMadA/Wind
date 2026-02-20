@@ -245,6 +245,21 @@ class GDriveClient:
 
     # ── verification ────────────────────────────────────────────────
 
+    def verify_integrity(self, local_path: Path, uploaded_meta: dict) -> bool:
+        """Compare local MD5 against the MD5 Google Drive computed on upload."""
+        gdrive_md5 = uploaded_meta.get("md5Checksum")
+        if not gdrive_md5:
+            gdrive_md5 = self.get_file_md5(uploaded_meta["id"])
+        if not gdrive_md5:
+            logger.warning(
+                "Google Drive did not return an MD5 for %s \u2013 skipping verification.",
+                local_path.name,
+            )
+            return True
+
+        local_md5 = self.compute_local_md5(local_path)
+        return local_md5 == gdrive_md5
+
     def get_file_md5(self, file_id: str) -> str | None:
         """Return the md5Checksum reported by Google Drive for *file_id*."""
         meta = self._service.files().get(fileId=file_id, fields="md5Checksum").execute()

@@ -359,6 +359,21 @@ class OneDriveClient:
 
     # ── verification ────────────────────────────────────────────────
 
+    def verify_integrity(self, local_path: Path, uploaded_meta: dict) -> bool:
+        """Compare local SHA256 against the SHA256 OneDrive computed on upload."""
+        remote_sha256 = uploaded_meta.get("file", {}).get("hashes", {}).get("sha256Hash")
+        if not remote_sha256:
+            remote_sha256 = self.get_file_sha256(uploaded_meta["id"])
+        if not remote_sha256:
+            logger.warning(
+                "OneDrive did not return a SHA256 for %s \u2013 skipping verification.",
+                local_path.name,
+            )
+            return True
+
+        local_sha256 = self.compute_sha256(local_path)
+        return local_sha256.upper() == remote_sha256.upper()
+
     def get_file_sha256(self, item_id: str) -> str | None:
         """Return the sha256Hash reported by OneDrive for the given item."""
         url = f"{GRAPH_BASE}/me/drive/items/{item_id}"

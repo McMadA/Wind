@@ -18,32 +18,37 @@ from rich.text import Text
 
 from sync_drive.gdrive_client import GDriveClient
 from sync_drive.onedrive_client import OneDriveClient
-from sync_drive.sync_engine import SyncDirection, SyncEngine, format_size
+from sync_drive.icloud_client import ICloudClient
+from sync_drive.sync_engine import SyncEngine, format_size
 
 LOG_DIR = "logs"
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Sync files between OneDrive and Google Drive with verification."
+        description="Sync files between cloud storage services (OneDrive, Google Drive, iCloud) with verification."
     )
     parser.add_argument(
-        "--direction",
-        choices=("onedrive-to-gdrive", "gdrive-to-onedrive"),
-        default=os.getenv("SYNC_DIRECTION", "onedrive-to-gdrive"),
-        help="Sync direction (default: onedrive-to-gdrive)",
+        "--source",
+        choices=("onedrive", "gdrive", "icloud"),
+        default=os.getenv("SOURCE_SERVICE", "onedrive"),
+        help="Source service (default: onedrive)",
     )
     parser.add_argument(
-        "--onedrive-folder",
-        default=os.getenv("ONEDRIVE_SYNC_FOLDER", "/"),
-        help="OneDrive folder path "
-             "(source for onedrive-to-gdrive, destination for gdrive-to-onedrive; default: /)",
+        "--dest",
+        choices=("onedrive", "gdrive", "icloud"),
+        default=os.getenv("DEST_SERVICE", "gdrive"),
+        help="Destination service (default: gdrive)",
     )
     parser.add_argument(
-        "--gdrive-folder-id",
-        default=os.getenv("GOOGLE_DRIVE_TARGET_FOLDER", "root"),
-        help="Google Drive folder ID "
-             "(destination for onedrive-to-gdrive, source for gdrive-to-onedrive; default: root)",
+        "--source-path",
+        default=os.getenv("SOURCE_PATH", "/"),
+        help="Source folder path or ID (default: / or root)",
+    )
+    parser.add_argument(
+        "--dest-path",
+        default=os.getenv("DEST_PATH", "/"),
+        help="Destination folder path or ID (default: / or root)",
     )
     parser.add_argument(
         "--temp-dir",
@@ -161,7 +166,6 @@ def _print_dry_run(console: Console, files: list[dict]) -> None:
 def main() -> int:
     load_dotenv()
     args = _build_parser().parse_args()
-    direction = SyncDirection(args.direction)
 
     # ── console setup ────────────────────────────────────────────────
     use_color = sys.stdout.isatty() and not args.no_color and not os.getenv("NO_COLOR")
@@ -176,60 +180,63 @@ def main() -> int:
     logging.info("Log file: %s", log_filename)
 
     # ── build clients ────────────────────────────────────────────────
-    client_id = os.getenv("ONEDRIVE_CLIENT_ID")
-    client_secret = os.getenv("ONEDRIVE_CLIENT_SECRET")
-    tenant_id = os.getenv("ONEDRIVE_TENANT_ID", "common")
-    redirect_uri = os.getenv("ONEDRIVE_REDIRECT_URI", "http://localhost:8400")
-    credentials_file = os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json")
+    def get_client(service_name: str):
+        if service_name == "onedrive":
+            client_id = os.getenv("ONEDRIVE_CLIENT_ID")
+            client_secret = os.getenv("ONEDRIVE_CLIENT_SECRET")
+            tenant_id = os.getenv("ONEDRIVE_TENANT_ID", "common")
+            redirect_uri = os.getenv("ONEDRIVE_REDIRECT_URI", "http://localhost:8400")
+            if not client_id or not client_secret:
+                raise ValueError("ONEDRIVE_CLIENT_ID and ONEDRIVE_CLIENT_SECRET must be set.")
+            return OneDriveClient(client_id, client_secret, tenant_id, redirect_uri)
+        
+        elif service_name == "gdrive":
+            credentials_file = os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json")
+            return GDriveClient(credentials_file=credentials_file)
+        
+        elif service_name == "icloud":
+            apple_id = os.getenv("APPLE_ID")
+            password = os.getenv("APPLE_PASSWORD")
+            if not apple_id or not password:
+                raise ValueError("APPLE_ID and APPLE_PASSWORD must be set for iCloud.")
+            return ICloudClient(apple_id, password)
+        
+        else:
+            raise ValueError(f"Unknown service: {service_name}")
 
-    if not client_id or not client_secret:
-        logging.error(
-            "ONEDRIVE_CLIENT_ID and ONEDRIVE_CLIENT_SECRET must be set. "
-            "Copy .env.example to .env and fill in your credentials."
-        )
+    try:
+        source_client = get_client(args.source)
+        dest_client = get_client(args.dest)
+    except Exception as e:
+        logging.error(f"Failed to initialize clients: {e}")
         return 1
 
-    onedrive = OneDriveClient(
-        client_id=client_id,
-        client_secret=client_secret,
-        tenant_id=tenant_id,
-        redirect_uri=redirect_uri,
-    )
-    gdrive = GDriveClient(credentials_file=credentials_file)
-
-    # ── determine source / destination based on direction ────────────
-    if direction == SyncDirection.ONEDRIVE_TO_GDRIVE:
-        source_folder = args.onedrive_folder
-        target_folder = args.gdrive_folder_id
-        panel_text = "OneDrive -> Google Drive Sync"
-    else:
-        source_folder = args.gdrive_folder_id
-        target_folder = args.onedrive_folder
-        panel_text = "Google Drive -> OneDrive Sync"
+    source_folder = args.source_path
+    target_folder = args.dest_path
+    panel_text = f"{args.source} -> {args.dest} Sync"
 
     # ── dry-run mode ─────────────────────────────────────────────────
     if args.dry_run:
-        logging.info("Dry-run mode (%s): listing files without transferring.", args.direction)
-        if direction == SyncDirection.ONEDRIVE_TO_GDRIVE:
-            files = list(onedrive.list_files(source_folder))
-        else:
-            files = list(gdrive.list_files(source_folder))
+        logging.info("Dry-run mode (%s -> %s): listing files without transferring.", args.source, args.dest)
+        files = list(source_client.list_files(source_folder))
         _print_dry_run(console, files)
         return 0
 
     # ── run sync ─────────────────────────────────────────────────────
     console.print(Panel(panel_text, style="bold blue", padding=(0, 2)))
-    logging.info("Direction: %s", args.direction)
+    logging.info("Source: %s (%s)", args.source, source_folder)
+    logging.info("Dest  : %s (%s)", args.dest, target_folder)
     logging.info("Duplicate mode: %s", args.on_duplicate)
 
     engine = SyncEngine(
-        onedrive=onedrive,
-        gdrive=gdrive,
+        source_client=source_client,
+        dest_client=dest_client,
+        source_name=args.source,
+        dest_name=args.dest,
         temp_dir=args.temp_dir,
         target_folder=target_folder,
         on_duplicate=args.on_duplicate,
         console=console if use_color else None,
-        direction=direction,
     )
 
     start = time.monotonic()

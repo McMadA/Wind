@@ -2,23 +2,23 @@
 
 A collection of sync scripts for moving files between cloud storage services.
 
-- **OneDrive ↔ Google Drive** – bidirectional sync with checksum verification
-- **Google Drive → Google Photos** – multi-threaded bulk upload with dedup
+- **Cloud Drive Sync** – Generic sync between **OneDrive**, **Google Drive**, and **iCloud** with verification.
+- **Google Drive → Google Photos** – multi-threaded bulk upload with dedup.
 
 ---
 
-## Tool 1 – OneDrive ↔ Google Drive Sync (`sync_drive/`)
+## Tool 1 – Cloud Drive Sync (`sync_drive/`)
 
 ### Features
 
-- **Bidirectional sync** – OneDrive to Google Drive *or* Google Drive to OneDrive
-- **Recursive sync** – syncs all files and folders from the source directory
-- **Checksum verification** – MD5 (Google Drive) or SHA256 (OneDrive) verification after each upload
-- **Progress bars** – real-time download/upload progress with transfer speeds
-- **Colored output** – structured, color-coded log messages in the terminal
-- **Dry-run mode** – preview which files would be synced before transferring
-- **Duplicate handling** – skip, overwrite, or create copies of existing files
-- **Audit log** – every run is saved to a timestamped log file in `logs/`
+- **Multi-service support** – Sync between any combination of **OneDrive**, **Google Drive**, and **iCloud Drive**.
+- **Recursive sync** – syncs all files and folders from the source directory.
+- **Integrity verification** – Service-specific checksums (MD5 for GDrive, SHA256 for OneDrive) or file size (iCloud) verification after each upload.
+- **Progress bars** – real-time download/upload progress with transfer speeds.
+- **Colored output** – structured, color-coded log messages in the terminal.
+- **Dry-run mode** – preview which files would be synced before transferring.
+- **Duplicate handling** – skip, overwrite, or create copies of existing files.
+- **Audit log** – every run is saved to a timestamped log file in `logs/`.
 
 ### How it works
 
@@ -31,10 +31,19 @@ A collection of sync scripts for moving files between cloud storage services.
 ### Prerequisites
 
 - Python 3.11+
-- A **Microsoft Azure** app registration (for OneDrive / Microsoft Graph access)
-- A **Google Cloud** project with the Drive API enabled and an OAuth 2.0 client
+- A **Microsoft Azure** app registration (for OneDrive / Microsoft Graph access).
+- A **Google Cloud** project with the Drive API enabled and an OAuth 2.0 client.
+- **Apple ID** and App-Specific Password (for iCloud).
 
 ### Getting credentials
+
+#### iCloud (Apple)
+
+1. Sign in to [appleid.apple.com](https://appleid.apple.com/).
+2. Go to **Sign-In and Security** > **App-Specific Passwords**.
+3. Generate a new password (e.g., "WindSync").
+4. Use your Apple ID and this password in your `.env` file.
+   - Note: The first time you run with iCloud, you will be prompted for a 2FA code in the terminal.
 
 #### OneDrive (Microsoft Azure)
 
@@ -98,27 +107,18 @@ The next run will prompt you to sign in again.
 ### Usage
 
 ```bash
-# ── OneDrive to Google Drive (default) ──
+# ── Sync between any service (OneDrive, GDrive, iCloud) ──
 
-# Sync everything in OneDrive root to Google Drive root
-python -m sync_drive.cli
+# Sync from iCloud to Google Drive
+python -m sync_drive.cli --source icloud --dest gdrive --source-path /Photos --dest-path root
 
-# Sync a specific OneDrive folder into a specific Google Drive folder
-python -m sync_drive.cli --onedrive-folder /Documents --gdrive-folder-id <folder-id>
-
-# ── Google Drive to OneDrive ──
-
-# Sync everything in Google Drive root to OneDrive root
-python -m sync_drive.cli --direction gdrive-to-onedrive
-
-# Sync a specific Google Drive folder into a specific OneDrive folder
-python -m sync_drive.cli --direction gdrive-to-onedrive --gdrive-folder-id <folder-id> --onedrive-folder /Backup
+# Sync from Google Drive to OneDrive
+python -m sync_drive.cli --source gdrive --dest onedrive --source-path <gdrive-folder-id> --dest-path /Backup
 
 # ── Common options ──
 
 # Preview files without transferring (dry run)
-python -m sync_drive.cli --dry-run
-python -m sync_drive.cli --direction gdrive-to-onedrive --dry-run
+python -m sync_drive.cli --source icloud --dest gdrive --dry-run
 
 # Verbose output
 python -m sync_drive.cli -v
@@ -139,10 +139,13 @@ All options can be set via environment variables (`.env`) or CLI flags:
 | `ONEDRIVE_CLIENT_ID`         | –                     | *(required)*         |
 | `ONEDRIVE_CLIENT_SECRET`     | –                     | *(required)*         |
 | `ONEDRIVE_TENANT_ID`         | –                     | `common`             |
-| `SYNC_DIRECTION`             | `--direction`         | `onedrive-to-gdrive` |
-| `ONEDRIVE_SYNC_FOLDER`       | `--onedrive-folder`   | `/`                  |
+| `APPLE_ID`                   | –                     | *(for iCloud)*       |
+| `APPLE_PASSWORD`             | –                     | *(for iCloud)*       |
+| `SOURCE_SERVICE`             | `--source`            | `onedrive`           |
+| `DEST_SERVICE`               | `--dest`              | `gdrive`             |
+| `SOURCE_PATH`                | `--source-path`       | `/`                  |
+| `DEST_PATH`                  | `--dest-path`         | `/`                  |
 | `GOOGLE_CREDENTIALS_FILE`    | –                     | `credentials.json`   |
-| `GOOGLE_DRIVE_TARGET_FOLDER` | `--gdrive-folder-id`  | `root`               |
 | `TEMP_DIR`                   | `--temp-dir`          | `.sync_temp`         |
 | –                            | `--on-duplicate`      | `skip`               |
 | –                            | `--dry-run`           | off                  |

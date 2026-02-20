@@ -23,7 +23,7 @@ Prerequisites
 
 File structure (all created automatically on first run)
 -------------------------------------------------------
-  client_secret.json        — OAuth credentials  (you supply this)
+  credentials.json.json        — OAuth credentials  (you supply this)
   token.json                — Cached OAuth token (auto-refreshed)
   uploaded_ids.json         — Drive file IDs already uploaded (progress log)
   uploaded_hashes.json      — SHA-256 hashes of uploaded content (hash dedup)
@@ -88,8 +88,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/photoslibrary.appendonly",
 ]
 
-CLIENT_SECRET_FILE = "client_secret.json"
-TOKEN_FILE = "token.json"
+CLIENT_SECRET_FILE = "../credentials.json"
+TOKEN_FILE = "../token.json"
 
 # Persistent state files
 UPLOADED_IDS_FILE = "uploaded_ids.json"
