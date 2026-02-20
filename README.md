@@ -13,9 +13,12 @@ A collection of sync scripts for moving files between cloud storage services.
 
 - **Multi-service support** – Sync between any combination of **OneDrive**, **Google Drive**, **iCloud Drive**, and **Google Photos**.
 - **Recursive sync** – syncs all files and folders from the source directory.
-- **Integrity verification** – Service-specific checksums (MD5 for GDrive, SHA256 for OneDrive) or file size (iCloud, GPhotos) verification after each upload.
-- **Progress bars** – real-time download/upload progress with transfer speeds.
-- **Move mode** – delete files from source after successful verification at destination (`--move`).
+- **Move mode** – delete files from source after successful verification at destination (`--move`). This uses a "Copy-then-Verify-then-Delete" strategy to ensure no data loss.
+- **Integrity verification** – Service-specific checks:
+    - **OneDrive**: SHA256 hash comparison.
+    - **Google Drive**: MD5 hash comparison.
+    - **iCloud**: File size comparison.
+    - **Google Photos**: Upload confirmation.
 - **Dry-run mode** – preview which files would be synced before transferring.
 - **Duplicate handling** – skip, overwrite, or create copies of existing files.
 - **Audit log** – every run is saved to a timestamped log file in `logs/`.
@@ -25,8 +28,8 @@ A collection of sync scripts for moving files between cloud storage services.
 1. Lists all files in the specified source folder (recursively).
 2. Downloads each file to a local temp directory.
 3. Recreates the folder structure at the destination and uploads the file.
-4. Verifies the upload using the destination's integrity check (MD5, SHA256, or size).
-5. (Optional) Deletes the source file if `--move` is specified and verification passed.
+4. Verifies the upload using the destination's integrity check (SHA256, MD5, or size).
+5. **(Optional) Move Logic**: If `--move` is specified, the source file is deleted **only if verification passed**. If a checksum mismatch is detected, the source file is preserved and an error is logged.
 6. Reports a summary of transferred, verified, and failed files.
 
 ### Prerequisites
