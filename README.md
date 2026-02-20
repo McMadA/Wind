@@ -4,6 +4,41 @@ A collection of sync scripts for moving files between cloud storage services.
 
 - **Cloud Drive Sync** – Generic sync between **OneDrive**, **Google Drive**, **iCloud**, and **Google Photos** with verification.
 - **Google Drive → Google Photos (v2)** – multi-threaded bulk upload with advanced deduplication.
+- **Web UI** – Browser-based interface to manage syncs with real-time progress monitoring.
+
+---
+
+## Web Interface
+
+A FastAPI-powered web application that provides a user-friendly browser interface for running and monitoring syncs.
+
+### Features
+
+- **Tabbed interface** – Switch between Drive Sync and Google Photos Sync operations.
+- **Real-time progress streaming** – Watch sync operations unfold in the terminal window (powered by Server-Sent Events).
+- **Form-based input** – Easily specify source, destination, paths, and options without memorizing CLI flags.
+- **Options for every operation**:
+  - **Move mode** – delete source files after successful verification.
+  - **Dry-run mode** – preview changes without transferring files.
+  - **Duplicate handling** – choose to skip, overwrite, or create copies.
+  - **Worker threads** – control parallelization for Photos sync.
+  - **Deduplication strategy** – pick `filename`, `hash`, or `filename+hash` dedup mode.
+- **Log clearing** – clear the terminal output at any time.
+- **Help icons** – contextual explanations for advanced options.
+
+### Running the Web Server
+
+```bash
+# Install dependencies (if not already done)
+pip install -r requirements.txt
+
+# Start the server
+python web/backend/main.py
+
+# Open your browser to http://localhost:8000
+```
+
+The server runs on **port 8000**. The frontend is served automatically at `/` and the API endpoints are available at `/api/sync/drive` and `/api/sync/photos`.
 
 ---
 
