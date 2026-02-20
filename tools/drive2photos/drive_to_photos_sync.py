@@ -88,8 +88,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/photoslibrary.appendonly",
 ]
 
-CLIENT_SECRET_FILE = "../credentials.json"
-TOKEN_FILE = "../token.json"
+CLIENT_SECRET_FILE = "../../credentials.json"
+TOKEN_FILE = "../../token.json"
 
 # Persistent state files
 UPLOADED_IDS_FILE = "uploaded_ids.json"

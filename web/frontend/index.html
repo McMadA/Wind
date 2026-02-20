@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wind - Cloud Sync Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .help-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            font-size: 12px;
+            cursor: pointer;
+            margin-left: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            transition: all 0.2s;
+        }
+
+        .help-icon:hover {
+            background: rgba(255, 255, 255, 0.4);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: var(--surface-light);
+            padding: 24px;
+            border-radius: 12px;
+            max-width: 400px;
+            color: var(--text-light);
+            border: 1px solid var(--border-light);
+        }
+
+        .modal-content h3 {
+            margin-top: 0;
+            margin-bottom: 12px;
+        }
+
+        .modal-content ol {
+            margin-left: 20px;
+            margin-bottom: 20px;
+        }
+
+        .modal-content li {
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+
+        .modal-content code {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 2px 4px;
+            border-radius: 4px;
+            word-break: break-all;
+        }
+
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.2);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+            margin-left: 10px;
+        }
+
+        .btn-danger:hover {
+            background: rgba(239, 68, 68, 0.3);
+        }
+
+        .btn-row {
+            display: flex;
+            align-items: center;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="glass-panel">
+            <div class="logo">
+                <span class="logo-icon">💨</span>
+                <h1>Wind<span class="fw-light">Sync</span></h1>
+            </div>
+            <nav class="tabs">
+                <button class="tab-btn active" data-target="cloud-drive">Cloud Drive</button>
+                <button class="tab-btn" data-target="drive-photos">Drive to Photos</button>
+            </nav>
+        </header>
+
+        <!-- Main Content Grid -->
+        <main class="main-grid">
+
+            <!-- Left Column: Configuration Forms -->
+            <section class="config-panel glass-panel">
+
+                <!-- Cloud Drive Sync Form -->
+                <form id="cloud-drive-form" class="sync-form active-form">
+                    <h2>Drive Sync Configuration</h2>
+                    <p class="subtitle">Sync files between OneDrive, Google Drive, and iCloud.</p>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="cd-source">Source Service</label>
+                            <select id="cd-source" name="source" required>
+                                <option value="onedrive">OneDrive</option>
+                                <option value="gdrive">Google Drive</option>
+                                <option value="icloud">iCloud</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="cd-dest">Destination Service</label>
+                            <select id="cd-dest" name="dest" required>
+                                <option value="gdrive">Google Drive</option>
+                                <option value="onedrive">OneDrive</option>
+                                <option value="icloud">iCloud</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="cd-source-path">
+                            Source Path (or Folder ID) <span class="help-icon help-folder-id"
+                                title="How to get Folder ID">?</span>
+                        </label>
+                        <input type="text" id="cd-source-path" name="source_path" value="/" required
+                            placeholder="e.g. /Photos or <folder-id>">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="cd-dest-path">
+                            Destination Path (or Folder ID) <span class="help-icon help-folder-id"
+                                title="How to get Folder ID">?</span>
+                        </label>
+                        <input type="text" id="cd-dest-path" name="dest_path" value="/" required
+                            placeholder="e.g. /Backup or <folder-id>">
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="cd-on-duplicate">On Duplicate</label>
+                            <select id="cd-on-duplicate" name="on_duplicate">
+                                <option value="skip">Skip</option>
+                                <option value="overwrite">Overwrite</option>
+                                <option value="duplicate">Duplicate</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="toggle-group">
+                        <label class="toggle">
+                            <input type="checkbox" name="move" id="cd-move">
+                            <span class="slider"></span>
+                            <span class="toggle-label">Move (Delete from source after verify)</span>
+                        </label>
+                        <label class="toggle">
+                            <input type="checkbox" name="dry_run" id="cd-dry-run">
+                            <span class="slider"></span>
+                            <span class="toggle-label">Dry Run (Preview only)</span>
+                        </label>
+                        <label class="toggle">
+                            <input type="checkbox" name="verbose" id="cd-verbose">
+                            <span class="slider"></span>
+                            <span class="toggle-label">Verbose Logging</span>
+                        </label>
+                    </div>
+
+                    <div class="btn-row">
+                        <button type="submit" class="btn-primary" id="cd-start-btn">
+                            <span class="btn-text">Start Sync</span>
+                            <div class="spinner hidden"></div>
+                        </button>
+                        <button type="button" class="btn-danger hidden" id="cd-stop-btn">Stop</button>
+                    </div>
+                </form>
+
+                <!-- Drive to Photos Form -->
+                <form id="drive-photos-form" class="sync-form">
+                    <h2>Drive to Photos Batch</h2>
+                    <p class="subtitle">Bulk upload from Google Drive to Google Photos.</p>
+
+                    <div class="form-group">
+                        <label>Scope</label>
+                        <div class="radio-group">
+                            <label class="radio-label">
+                                <input type="radio" name="scope" value="all" checked>
+                                <span>Entire Drive</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="scope" value="folder">
+                                <span>Specific Folder</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-group" id="dp-folder-group" style="display: none;">
+                        <label for="dp-folder">
+                            Folder ID <span class="help-icon help-folder-id" title="How to get Folder ID">?</span>
+                        </label>
+                        <input type="text" id="dp-folder" name="folder" placeholder="Enter Google Drive Folder ID">
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="dp-workers">Parallel Workers</label>
+                            <input type="number" id="dp-workers" name="workers" value="10" min="1" max="50">
+                        </div>
+                        <div class="form-group">
+                            <label for="dp-dedup">Deduplication Mode</label>
+                            <select id="dp-dedup" name="dedup_mode">
+                                <option value="filename">Filename (Fast)</option>
+                                <option value="hash">Hash (Accurate)</option>
+                                <option value="filename+hash">Filename + Hash (Thorough)</option>
+                                <option value="none">None (Fastest)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="toggle-group">
+                        <label class="toggle">
+                            <input type="checkbox" name="dry_run" id="dp-dry-run">
+                            <span class="slider"></span>
+                            <span class="toggle-label">Dry Run (Preview only)</span>
+                        </label>
+                    </div>
+
+                    <div class="btn-row" style="margin-top: auto;">
+                        <button type="submit" class="btn-primary" id="dp-start-btn">
+                            <span class="btn-text">Start Batch Upload</span>
+                            <div class="spinner hidden"></div>
+                        </button>
+                        <button type="button" class="btn-danger hidden" id="dp-stop-btn">Stop</button>
+                    </div>
+                </form>
+
+            </section>
+
+            <!-- Right Column: Terminal View -->
+            <section class="terminal-panel glass-panel">
+                <div class="terminal-header">
+                    <div class="window-controls">
+                        <span></span><span></span><span></span>
+                    </div>
+                    <div class="terminal-title">Live Execution Log</div>
+                    <button id="clear-log-btn" class="btn-icon" title="Clear Logs">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2">
+                            </path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="terminal-body" id="terminal-output">
+                    <div class="log-line system-msg">Welcome to Wind Sync Console. Select a task and click 'Start' to
+                        begin.</div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Help Modal -->
+    <div id="help-modal" class="modal hidden">
+        <div class="modal-content glass-panel">
+            <h3>How to get a Folder ID</h3>
+            <p>To get a folder ID from Google Drive or OneDrive:</p>
+            <ol>
+                <li>Open your cloud drive in the browser.</li>
+                <li>Navigate to the specific folder you want to sync.</li>
+                <li>Look at the URL in your browser's address bar.</li>
+                <li>The Folder ID is the long string of letters and numbers at the end of the URL.</li>
+                <li>Example: <br /><code>https://drive.google.com/drive/folders/<b>1A2b3C4d5E6f7G8h9I0j</b></code></li>
+            </ol>
+            <button id="close-help-btn" class="btn-primary">Close</button>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=2"></script>
+</body>
+
+</html>
