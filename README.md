@@ -3,7 +3,7 @@
 A collection of sync scripts for moving files between cloud storage services.
 
 - **Cloud Drive Sync** – Generic sync between **OneDrive**, **Google Drive**, **iCloud**, and **Google Photos** with verification.
-- **Google Drive → Google Photos (legacy tool)** – multi-threaded bulk upload with dedup.
+- **Google Drive → Google Photos (v2)** – multi-threaded bulk upload with advanced deduplication.
 
 ---
 
@@ -13,9 +13,9 @@ A collection of sync scripts for moving files between cloud storage services.
 
 - **Multi-service support** – Sync between any combination of **OneDrive**, **Google Drive**, **iCloud Drive**, and **Google Photos**.
 - **Recursive sync** – syncs all files and folders from the source directory.
-- **Integrity verification** – Service-specific checksums (MD5 for GDrive, SHA256 for OneDrive) or file size/cache (iCloud, GPhotos) verification after each upload.
+- **Integrity verification** – Service-specific checksums (MD5 for GDrive, SHA256 for OneDrive) or file size (iCloud, GPhotos) verification after each upload.
 - **Progress bars** – real-time download/upload progress with transfer speeds.
-- **Colored output** – structured, color-coded log messages in the terminal.
+- **Move mode** – delete files from source after successful verification at destination (`--move`).
 - **Dry-run mode** – preview which files would be synced before transferring.
 - **Duplicate handling** – skip, overwrite, or create copies of existing files.
 - **Audit log** – every run is saved to a timestamped log file in `logs/`.
@@ -25,14 +25,15 @@ A collection of sync scripts for moving files between cloud storage services.
 1. Lists all files in the specified source folder (recursively).
 2. Downloads each file to a local temp directory.
 3. Recreates the folder structure at the destination and uploads the file.
-4. Verifies the upload using the destination's checksum (MD5 for Google Drive, SHA256 for OneDrive).
-5. Reports a summary of transferred, verified, and failed files.
+4. Verifies the upload using the destination's integrity check (MD5, SHA256, or size).
+5. (Optional) Deletes the source file if `--move` is specified and verification passed.
+6. Reports a summary of transferred, verified, and failed files.
 
 ### Prerequisites
 
 - Python 3.11+
 - A **Microsoft Azure** app registration (for OneDrive / Microsoft Graph access).
-- A **Google Cloud** project with the Drive API enabled and an OAuth 2.0 client.
+- A **Google Cloud** project with the Drive and Photos Library APIs enabled and an OAuth 2.0 client.
 - **Apple ID** and App-Specific Password (for iCloud).
 
 ### Getting credentials
@@ -42,41 +43,31 @@ A collection of sync scripts for moving files between cloud storage services.
 1. Sign in to [appleid.apple.com](https://appleid.apple.com/).
 2. Go to **Sign-In and Security** > **App-Specific Passwords**.
 3. Generate a new password (e.g., "WindSync").
-4. Use your Apple ID and this password in your `.env` file.
+4. Use your Apple ID and this password in your `.env` file (`APPLE_ID` and `APPLE_PASSWORD`).
    - Note: The first time you run with iCloud, you will be prompted for a 2FA code in the terminal.
 
 #### OneDrive (Microsoft Azure)
 
 1. Go to the [Azure App Registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) portal and sign in.
 2. Click **New registration**.
-   - **Name**: choose any name (e.g. `WindSync`)
-   - **Supported account types**: select *Personal Microsoft accounts only* (or include org accounts if needed)
+   - **Name**: `WindSync`
+   - **Supported account types**: select *Personal Microsoft accounts only*
    - **Redirect URI**: select **Public client/native (mobile & desktop)** and enter `http://localhost:8400`
-3. Click **Register**. On the overview page, copy the **Application (client) ID** — this is your `ONEDRIVE_CLIENT_ID`.
+3. Click **Register**. Copy the **Application (client) ID** — this is your `ONEDRIVE_CLIENT_ID`.
 4. In the left sidebar go to **Certificates & secrets** > **Client secrets** > **New client secret**. Copy the secret **Value** (not the ID) — this is your `ONEDRIVE_CLIENT_SECRET`.
 5. In **API permissions**, click **Add a permission** > **Microsoft Graph** > **Delegated permissions** > search for `Files.ReadWrite` and `Files.ReadWrite.All`, then add them.
 
-#### Google Drive
+#### Google Drive & Photos
 
-1. Go to the [Google Cloud Console](https://console.cloud.google.com/) and create a new project (or select an existing one).
-2. Enable the **Google Drive API**: go to **APIs & Services** > **Library**, search for "Google Drive API", and click **Enable**.
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/) and create a new project.
+2. Enable the **Google Drive API** and **Photos Library API**.
 3. Set up the OAuth consent screen: go to **APIs & Services** > **OAuth consent screen**.
    - Choose **External** user type and click **Create**.
-   - Fill in the required app name and email fields, then click **Save and Continue**.
-   - On the **Scopes** step, click **Add or remove scopes**, search for `https://www.googleapis.com/auth/drive`, select it, and click **Update**.
-   - Add your Google account email under **Test users** (required while the app is in "Testing" status).
+   - On the **Scopes** step, add `https://www.googleapis.com/auth/drive` and `https://www.googleapis.com/auth/photoslibrary`.
+   - Add your Google account email under **Test users**.
 4. Create credentials: go to **APIs & Services** > **Credentials** > **Create Credentials** > **OAuth client ID**.
    - **Application type**: Desktop app
-   - **Name**: choose any name
 5. Click **Download JSON** and save the file as `credentials.json` in the project root.
-
-#### Finding your Google Drive folder ID
-
-If you want to sync from/into a specific Google Drive folder instead of the root:
-
-1. Open the folder in [Google Drive](https://drive.google.com) in your browser.
-2. The URL will look like: `https://drive.google.com/drive/folders/1aBcDeFgHiJkLmNoPqRsTuVwXyZ`
-3. The last part of the URL (`1aBcDeFgHiJkLmNoPqRsTuVwXyZ`) is the folder ID — use it as `GOOGLE_DRIVE_TARGET_FOLDER` in your `.env`.
 
 ### Setup
 
@@ -93,24 +84,13 @@ cp .env.example .env
 #    (credentials.json from the Google Cloud Console step above)
 ```
 
-### Upgrading from v0.2
-
-v0.3 changes the OAuth scopes for both Google Drive and OneDrive. After
-upgrading you must re-authenticate by deleting the cached token files:
-
-```bash
-rm -f token.json onedrive_token_cache.bin
-```
-
-The next run will prompt you to sign in again.
-
 ### Usage
 
 ```bash
 # ── Sync between any service (OneDrive, GDrive, iCloud) ──
 
 # Sync from iCloud to Google Drive
-python -m sync_drive.cli --source icloud --dest gdrive --source-path /Photos --dest-path root
+python -m sync_drive.cli --source icloud --dest gdrive --source-path /Photos --dest-path <gdrive-folder-id>
 
 # Sync from Google Drive to Google Photos
 python -m sync_drive.cli --source gdrive --dest gphotos --source-path <gdrive-folder-id>
@@ -143,43 +123,43 @@ python -m sync_drive.cli --no-color
 
 ### Configuration
 
-All options can be set via environment variables (`.env`) or CLI flags:
+All options can be set via environment variables (`.env`) or CLI flags. CLI flags take precedence.
 
-| Env variable                 | CLI flag              | Default              |
-| ---------------------------- | --------------------- | -------------------- |
-| `ONEDRIVE_CLIENT_ID`         | –                     | *(required)*         |
-| `ONEDRIVE_CLIENT_SECRET`     | –                     | *(required)*         |
-| `ONEDRIVE_TENANT_ID`         | –                     | `common`             |
-| `APPLE_ID`                   | –                     | *(for iCloud)*       |
-| `APPLE_PASSWORD`             | –                     | *(for iCloud)*       |
-| `SOURCE_SERVICE`             | `--source`            | `onedrive, gdrive, icloud, gphotos` |
-| `DEST_SERVICE`               | `--dest`              | `onedrive, gdrive, icloud, gphotos` |
-| `SOURCE_PATH`                | `--source-path`       | `/`                  |
-| `DEST_PATH`                  | `--dest-path`         | `/`                  |
-| `GOOGLE_CREDENTIALS_FILE`    | –                     | `credentials.json`   |
-| `TEMP_DIR`                   | `--temp-dir`          | `.sync_temp`         |
-| –                            | `--on-duplicate`      | `skip`               |
-| –                            | `--dry-run`           | off                  |
-| –                            | `--move`              | off                  |
-| –                            | `--no-color`          | off                  |
-| –                            | `--verbose` / `-v`    | off                  |
-| `NO_COLOR`                   | –                     | *(unset)*            |
+| Env variable              | CLI flag              | Default            | Description |
+| ------------------------- | --------------------- | ------------------ | ----------- |
+| `SOURCE_SERVICE`          | `--source`            | `onedrive`         | `onedrive, gdrive, icloud, gphotos` |
+| `DEST_SERVICE`            | `--dest`              | `gdrive`           | `onedrive, gdrive, icloud, gphotos` |
+| `SOURCE_PATH`             | `--source-path`       | `/`                | Source folder path or ID |
+| `DEST_PATH`               | `--dest-path`         | `/`                | Destination folder path or ID |
+| `TEMP_DIR`                | `--temp-dir`          | `.sync_temp`       | Local temp directory for downloads |
+| –                         | `--on-duplicate`      | `skip`             | `skip, overwrite, duplicate` |
+| –                         | `--move`              | off                | Delete source after successful verify |
+| –                         | `--dry-run`           | off                | List files without transferring |
+| –                         | `--verbose` / `-v`    | off                | Enable debug logging |
+| –                         | `--no-color`          | off                | Disable colored output/progress bars |
+| `ONEDRIVE_CLIENT_ID`      | –                     | *(required)*       | Azure App Client ID |
+| `ONEDRIVE_CLIENT_SECRET`  | –                     | *(required)*       | Azure App Client Secret |
+| `APPLE_ID`                | –                     | *(required)*       | Apple ID for iCloud |
+| `APPLE_PASSWORD`          | –                     | *(required)*       | App-Specific Password for iCloud |
+| `GOOGLE_CREDENTIALS_FILE` | –                     | `credentials.json` | Path to Google OAuth JSON |
 
-The `--onedrive-folder` and `--gdrive-folder-id` arguments swap roles depending
-on the direction: one is the source and the other is the destination.
-
-Set the `NO_COLOR` environment variable to any value to disable colored output
-(follows the [no-color.org](https://no-color.org/) convention).
+Set the `NO_COLOR` environment variable to any value to disable colored output (follows the [no-color.org](https://no-color.org/) convention).
 
 ### Project structure
 
 ```
 sync_drive/
-  __init__.py           # Package version
+  clients/              # Cloud storage service implementations
+    gdrive.py           # Google Drive API wrapper
+    onedrive.py         # Microsoft Graph / OneDrive API wrapper
+    icloud.py           # iCloud Drive API wrapper
+    gphotos.py          # Google Photos API wrapper
   cli.py                # CLI entry point with rich logging and progress
-  onedrive_client.py    # Microsoft Graph / OneDrive API wrapper
-  gdrive_client.py      # Google Drive API wrapper
-  sync_engine.py        # Orchestrator with progress bars and checksum verification
+  engine.py             # Orchestrator with progress bars and verification
+tools/
+  drive2photos/         # Advanced multi-threaded tool for GDrive to Photos
+infra/
+  free-vm.bicep         # Azure Bicep template for a free VM
 ```
 
 ---
@@ -187,19 +167,20 @@ sync_drive/
 ## Tool 2 – Google Drive → Google Photos Sync (`drive2photos/`)
 
 Bulk-uploads photos and videos from Google Drive directly into your Google
-Photos library. Designed for large libraries — it resumes interrupted runs,
-skips files you've already uploaded, and processes multiple files in parallel.
+Photos library. This script is optimized for performance using a **Batch Collector**
+that groups uploads, reducing API round-trips by up to 50×.
 
 ### Features
 
-- **Multi-threaded uploads** – configurable worker count (`--workers N`, default 10)
-- **Three dedup modes** – `filename`, `hash`, or `filename+hash` to avoid re-uploading
-- **Photos library cache** – scans your Photos library once and caches results locally; use `--refresh-cache` to force a rescan
-- **Resumable** – progress is saved to `uploaded_ids.json` every N files, so a crash or Ctrl+C loses at most a handful of uploads
-- **Date filter** – `--since YYYY-MM-DD` to only process recently modified files
-- **Dry-run mode** – preview what would be uploaded without touching Photos
-- **Metadata preserved** – original Drive filename and timestamps stored in the Photos item description
-- **Interactive folder browser** – navigate your Drive hierarchy and pick one or more folders, or pass `--folder ID` / `--all` to skip the prompt
+- **Multi-threaded uploads** – configurable worker count (`--workers N`, default 10).
+- **Batching** – uses the `batchCreate` endpoint to process up to 50 items per request.
+- **Three dedup modes** – `filename`, `hash`, or `filename+hash` to avoid re-uploading.
+- **Photos library cache** – scans your Photos library once and caches results locally.
+- **Resumable** – progress is saved to `uploaded_ids.json`, allowing for easy resumption.
+- **Date filter** – `--since YYYY-MM-DD` to only process recently modified files.
+- **Dry-run mode** – preview what would be uploaded without touching Photos.
+- **Metadata preserved** – original Drive filename and timestamps stored in the Photos item description.
+- **Interactive folder browser** – navigate your Drive hierarchy and pick folders.
 
 ### Prerequisites
 
@@ -207,34 +188,12 @@ skips files you've already uploaded, and processes multiple files in parallel.
 pip install google-api-python-client google-auth google-auth-oauthlib requests
 ```
 
-You will need a Google Cloud project with **two** APIs enabled:
+Uses the same `credentials.json` in the project root as Tool 1. Ensure the **Photos Library API** is enabled in your Google Cloud project.
 
-1. **Google Drive API** – to read your files
-2. **Google Photos Library API** – to upload them
-
-#### Setting up Google Cloud credentials
-
-1. Go to the [Google Cloud Console](https://console.cloud.google.com/) and create or select a project.
-2. Go to **APIs & Services** > **Library** and enable both:
-   - **Google Drive API**
-   - **Photos Library API**
-3. Go to **APIs & Services** > **OAuth consent screen**.
-   - Choose **External**, fill in the required fields, and click **Save and Continue**.
-   - On the **Scopes** step add:
-     - `https://www.googleapis.com/auth/drive.readonly`
-     - `https://www.googleapis.com/auth/photoslibrary.readonly`
-     - `https://www.googleapis.com/auth/photoslibrary.appendonly`
-   - Add your Google account under **Test users**.
-4. Go to **APIs & Services** > **Credentials** > **Create Credentials** > **OAuth client ID**.
-   - **Application type**: Desktop app
-5. Click **Download JSON** and save it as `client_secret.json` in the `drive2photos/` directory.
-
-### State files (auto-created)
+### State files (auto-created in `tools/drive2photos/`)
 
 | File | Purpose |
 |---|---|
-| `client_secret.json` | OAuth credentials — you supply this |
-| `token.json` | Cached OAuth token — auto-refreshed |
 | `uploaded_ids.json` | Drive file IDs that were successfully uploaded |
 | `uploaded_hashes.json` | SHA-256 hashes of uploaded content (hash dedup) |
 | `photos_filename_cache.json` | Cached Photos library filenames (filename dedup) |
@@ -242,7 +201,7 @@ You will need a Google Cloud project with **two** APIs enabled:
 ### Usage
 
 ```bash
-cd drive2photos
+cd tools/drive2photos
 
 # Interactive folder picker (default)
 python drive_to_photos_sync.py
@@ -251,45 +210,37 @@ python drive_to_photos_sync.py
 python drive_to_photos_sync.py --folder DRIVE_FOLDER_ID
 
 # Sync everything in your entire Drive
-python drive_to_photos_sync.py --all --workers 8
+python drive_to_photos_sync.py --all --workers 10
 
 # Most thorough dedup (checks filename AND content hash)
 python drive_to_photos_sync.py --dedup-mode filename+hash
 
-# Only files modified since a given date
-python drive_to_photos_sync.py --all --since 2024-06-01
-
 # Preview what would be uploaded without uploading
 python drive_to_photos_sync.py --dry-run --all
-
-# Force a fresh scan of your Photos library
-python drive_to_photos_sync.py --refresh-cache
 ```
 
 ### Performance tips
 
 | Goal | Command |
 |---|---|
-| First-time sync (no existing duplicates) | `python drive_to_photos_sync.py --all --workers 15 --skip-dedup --save-every 100` |
-| Fast with light dedup (filename only) | `python drive_to_photos_sync.py --all --workers 15 --dedup-mode filename --save-every 50` |
-| Incremental (only new/changed files) | `python drive_to_photos_sync.py --all --workers 15 --since 2025-01-01` |
+| First-time sync | `python drive_to_photos_sync.py --all --workers 15 --skip-dedup` |
+| Fast incremental | `python drive_to_photos_sync.py --all --workers 15 --dedup-mode filename` |
+| High integrity | `python drive_to_photos_sync.py --all --workers 10 --dedup-mode filename+hash` |
 
 Key levers:
 
-- **`--workers N`** — default is 10; the Photos API comfortably supports 10–15 concurrent connections. Raising this is the single biggest throughput knob.
-- **`--skip-dedup`** — removes all hash computation and Photos library scanning. Safe on a first run where no duplicates can exist.
-- **`--save-every 100`** — reduces disk writes from the default (every 25 files) to every 100, cutting I/O overhead.
-- **`--since DATE`** — skips files that haven't changed since the given date; huge speedup for incremental runs.
-
-Uploads are sent to Photos in batches of up to 50 items per API request (the maximum the `batchCreate` endpoint accepts), which reduces API round-trips by up to 50× compared to one request per file.
+- **`--workers N`** — 10-15 is the sweet spot for the Photos API.
+- **`--skip-dedup`** — bypasses all checks; fast but may cause duplicates in Photos.
+- **`--since DATE`** — skips files that haven't changed since the given date.
+- **`--save-every N`** — controls how often the ID/Hash log is flushed to disk.
 
 ### Dedup modes
 
 | Mode | How it works | Speed |
 |---|---|---|
-| `none` | Always upload (Photos may end up with duplicates) | Fastest |
-| `filename` *(default)* | Skip if the filename already exists anywhere in Photos | Fast |
-| `hash` | Download first, compute SHA-256, skip if same content was uploaded before | Slower |
+| `none` | Always upload | Fastest |
+| `filename` | Skip if the filename already exists in Photos (uses cache) | Fast |
+| `hash` | Download first, skip if same content was uploaded before | Slower |
 | `filename+hash` | Skip if *either* filename or hash matches | Most thorough |
 
 ### CLI reference
@@ -351,14 +302,17 @@ ssh azureuser@<public-ip>
 sudo apt update && sudo apt install -y python3-pip
 pip3 install google-api-python-client google-auth google-auth-oauthlib requests
 
-# Upload your credentials
-scp client_secret.json azureuser@<public-ip>:~/drive2photos/
-scp drive_to_photos_sync.py azureuser@<public-ip>:~/drive2photos/
+# Create tool directory
+mkdir -p ~/tools/drive2photos
+
+# Upload your credentials (from your local machine)
+scp credentials.json azureuser@<public-ip>:~/tools/
+scp tools/drive2photos/drive_to_photos_sync.py azureuser@<public-ip>:~/tools/drive2photos/
 
 # Start the sync in a tmux session so it survives SSH disconnects
 sudo apt install -y tmux
 tmux new -s sync
-cd ~/drive2photos
+cd ~/tools/drive2photos
 python3 drive_to_photos_sync.py --all --workers 10
 
 # Detach from tmux: Ctrl+B then D

@@ -16,11 +16,13 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from sync_drive.gdrive_client import GDriveClient
-from sync_drive.onedrive_client import OneDriveClient
-from sync_drive.icloud_client import ICloudClient
-from sync_drive.gphotos_client import GooglePhotosClient
-from sync_drive.sync_engine import SyncEngine, format_size
+from sync_drive.clients import (
+    GDriveClient,
+    OneDriveClient,
+    ICloudClient,
+    GooglePhotosClient,
+)
+from sync_drive.engine import SyncEngine, format_size
 
 LOG_DIR = "logs"
 
