@@ -122,3 +122,7 @@ async def trigger_photos_sync(req: PhotosSyncRequest):
 
     tools_dir = os.path.join(os.getcwd(), "tools", "drive2photos")
     return StreamingResponse(run_command_stream(cmd, cwd=tools_dir), media_type="text/event-stream")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

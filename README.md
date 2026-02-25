@@ -28,17 +28,22 @@ A FastAPI-powered web application that provides a user-friendly browser interfac
 
 ### Running the Web Server
 
-```bash
-# Install dependencies (if not already done)
-pip install -r requirements.txt
+The Web UI provides a graphical interface for configuring and monitoring sync operations.
 
-# Start the server
-python web/backend/main.py
+1.  **Install dependencies**:
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-# Open your browser to http://localhost:8000
-```
+2.  **Start the server**:
+    ```bash
+    python web/backend/main.py
+    ```
 
-The server runs on **port 8000**. The frontend is served automatically at `/` and the API endpoints are available at `/api/sync/drive` and `/api/sync/photos`.
+3.  **Access the UI**:
+    Open [http://localhost:8000](http://localhost:8000) in your browser.
+
+The server automatically serves the frontend and handles real-time log streaming via Server-Sent Events (SSE).
 
 ---
 
@@ -76,14 +81,6 @@ The server runs on **port 8000**. The frontend is served automatically at `/` an
 
 ### Getting credentials
 
-#### iCloud (Apple)
-
-1. Sign in to [appleid.apple.com](https://appleid.apple.com/).
-2. Go to **Sign-In and Security** > **App-Specific Passwords**.
-3. Generate a new password (e.g., "WindSync").
-4. Use your Apple ID and this password in your `.env` file (`APPLE_ID` and `APPLE_PASSWORD`).
-   - Note: The first time you run with iCloud, you will be prompted for a 2FA code in the terminal.
-
 #### OneDrive (Microsoft Azure)
 
 1. Go to the [Azure App Registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) portal and sign in.
@@ -106,6 +103,27 @@ The server runs on **port 8000**. The frontend is served automatically at `/` an
 4. Create credentials: go to **APIs & Services** > **Credentials** > **Create Credentials** > **OAuth client ID**.
    - **Application type**: Desktop app
 5. Click **Download JSON** and save the file as `credentials.json` in the project root.
+
+### iCloud Setup Tutorial
+
+iCloud requires a one-time manual step to handle Two-Factor Authentication (2FA), which cannot be processed directly through the Web UI.
+
+1.  **Configure Environment**:
+    - Open your `.env` file.
+    - Set `APPLE_ID` to your iCloud email.
+    - Set `APPLE_PASSWORD` to your **primary Apple ID account password**. This is required to generate the 2FA session. The password is not stored in plaintext; it's used to obtain a session token that is cached locally.
+
+2.  **Perform Initial CLI Authentication**:
+    - Open your terminal (PowerShell, Bash, etc.).
+    - Run the following command:
+      ```bash
+      python -m sync_drive.cli --source icloud --dry-run
+      ```
+    - **Enter your 2FA code**: A prompt will appear: `Enter the code you received:`. Enter the 6-digit code displayed on your Apple device.
+    - Once you see `iCloud authentication successful`, your session is cached in the `.icloud_cache/` folder.
+
+3.  **Use the Web UI**:
+    - You can now start the web server (`python web/backend/main.py`) and use iCloud sync features. The session will remain valid for several weeks.
 
 ### Setup
 

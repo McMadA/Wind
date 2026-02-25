@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pydantic
+python-dotenv
+rich
+google-api-python-client
+google-auth
+google-auth-oauthlib
+requests
+pyicloud
+msal

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from collections.abc import Callable, Generator
 from pathlib import Path
 
@@ -25,10 +26,30 @@ class ICloudClient:
         self._apple_id = apple_id
         self._password = password
         os.makedirs(cookie_directory, exist_ok=True)
-        self.api = PyiCloudService(apple_id, password, cookie_directory=cookie_directory)
+        
+        try:
+            self.api = PyiCloudService(apple_id, password, cookie_directory=cookie_directory)
+        except Exception as e:
+            # Catch common auth errors to provide better context
+            error_msg = str(e)
+            if "Invalid email/password" in error_msg:
+                raise RuntimeError(
+                    "iCloud auth failed: Invalid email or password. "
+                    "Note: If using an App-Specific Password, ensure it is correct. "
+                    "If you haven't authenticated before, you might need to use your main password "
+                    "once via the CLI to handle 2FA."
+                ) from e
+            raise
 
         if self.api.requires_2fa:
-            print("\n  2FA Required for iCloud. Please check your devices.")
+            if not sys.stdout.isatty():
+                raise RuntimeError(
+                    "iCloud 2FA required but terminal is non-interactive. "
+                    "Please run the CLI once manually to authenticate: "
+                    "python -m sync_drive.cli --source icloud --dry-run"
+                )
+
+            print("\n  [!] 2FA Required for iCloud. Please check your devices.")
             code = input("  Enter the code you received: ")
             result = self.api.validate_2fa_code(code)
             if not result:
