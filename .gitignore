@@ -1,13 +1,43 @@
+# Environment & Configuration
 .env
+.env.*
+
+# OAuth Tokens, Keys & Credentials
 credentials.json
 token.json
-*.pickle
-.sync_temp/
-logs/
+*token*.json
+*.token.json
 onedrive_token_cache.bin
+*.pickle
+
+# Caches and State files
+.sync_temp/
+.icloud_cache/
+.gdrive_scan_cache.json
+.icloud_photos_state.json
+*.json_cache
+
+# Logs and Run Outputs
+logs/
+logging.txt
+cleanup_*.txt
+onedrive_*.txt
+google_photos_*.txt
+dryrun*.txt
+*.log
+*.sample.txt
+
+# Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
 .venv/
 venv/
-.icloud_cache/
+env/
+.pytest_cache/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*

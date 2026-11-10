@@ -112,8 +112,9 @@
                 <h1>Wind<span class="fw-light">Sync</span></h1>
             </div>
             <nav class="tabs">
-                <button class="tab-btn active" data-target="cloud-drive">Cloud Drive</button>
-                <button class="tab-btn" data-target="drive-photos">Drive to Photos</button>
+                <button class="tab-btn active" data-target="google-icloud">Google → iCloud Migration</button>
+                <button class="tab-btn" data-target="cloud-drive">Cloud Drive Sync</button>
+                <button class="tab-btn" data-target="drive-photos">Drive to Google Photos</button>
             </nav>
         </header>
 
@@ -123,26 +124,131 @@
             <!-- Left Column: Configuration Forms -->
             <section class="config-panel glass-panel">
 
+                <!-- Google -> iCloud Smart Migration Form -->
+                <form id="google-icloud-form" class="sync-form active-form">
+                    <h2>Google → iCloud Smart Migration</h2>
+                    <p class="subtitle">Move Documents to iCloud Drive &amp; Photos (Google Drive + Google Photos/Takeout) to iCloud Photos without duplicates and with full EXIF Date + GPS Map metadata.</p>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="gi-gdrive-folder">
+                                Google Drive Folder ID <span class="help-icon help-folder-id" title="How to get Folder ID">?</span>
+                            </label>
+                            <input type="text" id="gi-gdrive-folder" name="gdrive_folder" value="root" required
+                                placeholder="root (entire Drive) or Folder ID">
+                        </div>
+                        <div class="form-group">
+                            <label for="gi-icloud-folder">iCloud Drive Docs Folder</label>
+                            <input type="text" id="gi-icloud-folder" name="icloud_drive_folder" value="/" required
+                                placeholder="e.g. / or /Google_Drive_Docs">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="gi-takeout-dir">Google Takeout Folder Path (Optional – Recommended for 100% Google Photos GPS)</label>
+                        <input type="text" id="gi-takeout-dir" name="takeout_dir"
+                            placeholder="e.g. ~/Downloads/Takeout (leave empty to use API only)">
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="gi-album">Apple Photos Album (Optional)</label>
+                            <input type="text" id="gi-album" name="album" placeholder="e.g. Google Import (optional)">
+                        </div>
+                        <div class="form-group">
+                            <label for="gi-dedup">Deduplication Mode</label>
+                            <select id="gi-dedup" name="dedup_mode">
+                                <option value="filename+hash" selected>Filename + Hash + Pixel Scan (Recommended)</option>
+                                <option value="hash">Hash + Pixel Scan Only</option>
+                                <option value="filename">Filename + Size Only</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="toggle-group">
+                        <label class="toggle">
+                            <input type="checkbox" name="use_gphotos_api" id="gi-use-gphotos-api" checked>
+                            <span class="slider"></span>
+                            <span class="toggle-label">Also scan Google Photos API for remaining photos</span>
+                        </label>
+                        <label class="toggle">
+                            <input type="checkbox" name="skip_documents" id="gi-skip-docs">
+                            <span class="slider"></span>
+                            <span class="toggle-label">Skip Phase 1 (Documents → iCloud Drive)</span>
+                        </label>
+                        <label class="toggle">
+                            <input type="checkbox" name="skip_gdrive_photos" id="gi-skip-gdrive-photos">
+                            <span class="slider"></span>
+                            <span class="toggle-label">Skip Phase 2 (Google Drive Photos → iCloud Photos)</span>
+                        </label>
+                        <label class="toggle">
+                            <input type="checkbox" name="refresh_cache" id="gi-refresh-cache">
+                            <span class="slider"></span>
+                            <span class="toggle-label">Force Rescan of Existing Apple Photos Library</span>
+                        </label>
+                        <label class="toggle">
+                            <input type="checkbox" name="dry_run" id="gi-dry-run">
+                            <span class="slider"></span>
+                            <span class="toggle-label">Dry Run (Preview without importing)</span>
+                        </label>
+                    </div>
+
+                    <div class="btn-row">
+                        <button type="submit" class="btn-primary" id="gi-start-btn">
+                            <span class="btn-text">Start Smart Migration</span>
+                            <div class="spinner hidden"></div>
+                        </button>
+                        <button type="button" class="btn-danger hidden" id="gi-stop-btn">Stop</button>
+                    </div>
+                </form>
+
                 <!-- Cloud Drive Sync Form -->
-                <form id="cloud-drive-form" class="sync-form active-form">
-                    <h2>Drive Sync Configuration</h2>
-                    <p class="subtitle">Sync files between OneDrive, Google Drive, and iCloud.</p>
+                <form id="cloud-drive-form" class="sync-form">
+                    <h2>Custom Sync Configuration</h2>
+                    <p class="subtitle">Sync between Google Drive, Google Photos, Takeout, iCloud Drive, iCloud Photos, and OneDrive.</p>
 
                     <div class="form-row">
                         <div class="form-group">
                             <label for="cd-source">Source Service</label>
                             <select id="cd-source" name="source" required>
+                                <option value="gdrive" selected>Google Drive</option>
+                                <option value="gphotos">Google Photos (API)</option>
+                                <option value="takeout">Google Takeout (Local Folder)</option>
+                                <option value="icloud-drive">iCloud Drive (macOS Local)</option>
+                                <option value="icloud">iCloud Drive (Web API)</option>
                                 <option value="onedrive">OneDrive</option>
-                                <option value="gdrive">Google Drive</option>
-                                <option value="icloud">iCloud</option>
                             </select>
                         </div>
                         <div class="form-group">
                             <label for="cd-dest">Destination Service</label>
                             <select id="cd-dest" name="dest" required>
+                                <option value="icloud-photos" selected>iCloud Photos (macOS Photos.app)</option>
+                                <option value="icloud-drive">iCloud Drive (macOS Local)</option>
+                                <option value="icloud">iCloud Drive (Web API)</option>
                                 <option value="gdrive">Google Drive</option>
+                                <option value="gphotos">Google Photos</option>
                                 <option value="onedrive">OneDrive</option>
-                                <option value="icloud">iCloud</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="cd-filter">File Filter</label>
+                            <select id="cd-filter" name="file_filter">
+                                <option value="all">All Files</option>
+                                <option value="documents">Documents Only (No Photos/Videos)</option>
+                                <option value="media" selected>Photos &amp; Videos Only</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="cd-dedup-mode">Deduplication Strategy</label>
+                            <select id="cd-dedup-mode" name="dedup_mode">
+                                <option value="filename+hash" selected>Filename + Hash + Pixel Scan</option>
+                                <option value="hash">Hash Only</option>
+                                <option value="filename">Filename Only</option>
+                                <option value="path">Same Path Only</option>
+                                <option value="none">None</option>
                             </select>
                         </div>
                     </div>
@@ -152,17 +258,17 @@
                             Source Path (or Folder ID) <span class="help-icon help-folder-id"
                                 title="How to get Folder ID">?</span>
                         </label>
-                        <input type="text" id="cd-source-path" name="source_path" value="/" required
-                            placeholder="e.g. /Photos or <folder-id>">
+                        <input type="text" id="cd-source-path" name="source_path" value="root" required
+                            placeholder="e.g. root, ~/Downloads/Takeout, or <folder-id>">
                     </div>
 
                     <div class="form-group">
                         <label for="cd-dest-path">
-                            Destination Path (or Folder ID) <span class="help-icon help-folder-id"
+                            Destination Path / Album Name <span class="help-icon help-folder-id"
                                 title="How to get Folder ID">?</span>
                         </label>
                         <input type="text" id="cd-dest-path" name="dest_path" value="/" required
-                            placeholder="e.g. /Backup or <folder-id>">
+                            placeholder="e.g. / or Album Name for iCloud Photos">
                     </div>
 
                     <div class="form-row">
@@ -205,7 +311,7 @@
 
                 <!-- Drive to Photos Form -->
                 <form id="drive-photos-form" class="sync-form">
-                    <h2>Drive to Photos Batch</h2>
+                    <h2>Drive to Google Photos Batch</h2>
                     <p class="subtitle">Bulk upload from Google Drive to Google Photos.</p>
 
                     <div class="form-group">
@@ -304,7 +410,7 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=2"></script>
+    <script src="/static/app.js?v=3"></script>
 </body>
 
 </html>

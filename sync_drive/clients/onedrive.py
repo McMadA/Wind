@@ -6,6 +6,7 @@ import hashlib
 import logging
 import os
 import sys
+import time
 from collections.abc import Callable, Generator
 from pathlib import Path
 from urllib.parse import quote
@@ -13,10 +14,30 @@ from urllib.parse import quote
 import msal
 import requests
 
+from sync_drive.metadata import (
+    PhotoMetadata,
+    matches_file_filter,
+    parse_date_from_filename,
+    parse_datetime_any,
+)
+
 logger = logging.getLogger(__name__)
 
+DEFAULT_CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e"
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
-SCOPES = ["Files.ReadWrite", "Files.ReadWrite.All"]
+SCOPES = ["Files.Read"]
+
+
+IGNORED_FOLDER_NAMES = {
+    "node_modules",
+    ".git",
+    ".next",
+    ".cache",
+    "venv",
+    ".venv",
+    "__pycache__",
+    "pods",
+}
 
 
 class OneDriveClient:
@@ -24,8 +45,8 @@ class OneDriveClient:
 
     def __init__(
         self,
-        client_id: str,
-        client_secret: str,
+        client_id: str | None = None,
+        client_secret: str | None = None,
         tenant_id: str = "common",
         redirect_uri: str = "http://localhost:8400",
         token_cache_path: str = "onedrive_token_cache.bin",
@@ -35,8 +56,9 @@ class OneDriveClient:
         if os.path.exists(token_cache_path):
             self._cache.deserialize(open(token_cache_path).read())
 
+        self.client_id = client_id or os.getenv("ONEDRIVE_CLIENT_ID") or DEFAULT_CLIENT_ID
         self._app = msal.PublicClientApplication(
-            client_id,
+            self.client_id,
             authority=f"https://login.microsoftonline.com/{tenant_id}",
             token_cache=self._cache,
         )
@@ -59,12 +81,20 @@ class OneDriveClient:
             flow = self._app.initiate_device_flow(scopes=SCOPES)
             if "user_code" not in flow:
                 raise RuntimeError(f"Device flow failed: {flow.get('error_description', 'unknown error')}")
+            verification_uri = flow.get("verification_uri", "https://microsoft.com/devicelogin")
+            user_code = flow["user_code"]
             logger.info(
-                "To sign in, visit https://microsoft.com/devicelogin and enter code: %s",
-                flow["user_code"],
+                "To sign in, visit %s and enter code: %s",
+                verification_uri,
+                user_code,
             )
-            print(f"\n  To sign in, visit https://microsoft.com/devicelogin and enter code: {flow['user_code']}\n")
+            print(f"\n  To sign in, visit {verification_uri} and enter code: {user_code}\n")
             sys.stdout.flush()
+            try:
+                import subprocess
+                subprocess.run(["open", verification_uri], capture_output=True)
+            except Exception:
+                pass
             result = self._app.acquire_token_by_device_flow(flow)
 
         if "access_token" not in result:
@@ -90,19 +120,21 @@ class OneDriveClient:
         self,
         folder_path: str = "/",
         progress_callback: Callable[[int, str], None] | None = None,
+        file_filter: str = "all",
     ) -> Generator[dict, None, None]:
         """Return a flat generator of file metadata dicts under *folder_path* (recursive).
 
         *progress_callback(file_count, current_folder)* is called each time a
         new file is discovered so the caller can display scanning progress.
         """
-        return self._walk(folder_path, [0], progress_callback)
+        return self._walk(folder_path, [0], progress_callback, file_filter=file_filter)
 
     def _walk(
         self,
         path: str,
         counter: list[int],
         progress_callback: Callable[[int, str], None] | None = None,
+        file_filter: str = "all",
     ) -> Generator[dict, None, None]:
         logger.info("  Scanning: %s", path)
         endpoint = (
@@ -111,22 +143,79 @@ class OneDriveClient:
             else f"{GRAPH_BASE}/me/drive/root:/{self._encode_path(path)}:/children"
         )
         while endpoint:
-            resp = requests.get(endpoint, headers=self._headers(), timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
+            data = None
+            for attempt in range(1, 6):
+                try:
+                    resp = requests.get(endpoint, headers=self._headers(), timeout=45)
+                    if resp.status_code == 429:
+                        retry_after = int(resp.headers.get("Retry-After", 5))
+                        logger.warning("OneDrive rate limited (429). Backing off for %ds...", retry_after)
+                        time.sleep(retry_after)
+                        continue
+                    resp.raise_for_status()
+                    data = resp.json()
+                    break
+                except (requests.exceptions.RequestException, requests.exceptions.Timeout) as exc:
+                    if attempt == 5:
+                        raise
+                    logger.warning("OneDrive scan interrupted (%s) on attempt %d/5; retrying in %ds...", exc, attempt, attempt * 2)
+                    time.sleep(attempt * 2)
+
+            if not data:
+                break
             for item in data.get("value", []):
                 if "folder" in item:
+                    folder_name = item.get("name", "").strip().lower()
+                    if folder_name in IGNORED_FOLDER_NAMES:
+                        logger.info("Skipping ignored folder: %s/%s", path, item["name"])
+                        continue
                     child_path = f"{path.rstrip('/')}/{item['name']}"
-                    yield from self._walk(child_path, counter, progress_callback)
+                    yield from self._walk(child_path, counter, progress_callback, file_filter=file_filter)
                 elif "file" in item:
+                    if item.get("name") in {".DS_Store", "Thumbs.db", "desktop.ini"}:
+                        continue
+                    mime_type = item.get("file", {}).get("mimeType")
+                    if not matches_file_filter(item["name"], mime_type, file_filter):
+                        continue
+                    rel_path = f"{path.rstrip('/')}/{item['name']}"
+                    photo_info = item.get("photo") or {}
+                    loc_info = item.get("location") or {}
+                    fs_info = item.get("fileSystemInfo") or {}
+
+                    date_is_fallback = False
+                    taken_at = parse_datetime_any(photo_info.get("takenDateTime"))
+                    if not taken_at:
+                        taken_at = parse_date_from_filename(item["name"], rel_path)
+                    if not taken_at:
+                        created = parse_datetime_any(fs_info.get("createdDateTime") or item.get("createdDateTime"))
+                        modified = parse_datetime_any(fs_info.get("lastModifiedDateTime") or item.get("lastModifiedDateTime"))
+                        taken_at = min(created, modified) if (created and modified) else (modified or created)
+                        if taken_at is not None:
+                            date_is_fallback = True
+
+                    lat = loc_info.get("latitude")
+                    lon = loc_info.get("longitude")
+                    alt = loc_info.get("altitude")
+
                     file_meta = {
                         "id": item["id"],
                         "name": item["name"],
-                        "path": f"{path.rstrip('/')}/{item['name']}",
+                        "path": rel_path,
                         "size": item.get("size", 0),
                         "sha256": item.get("file", {}).get("hashes", {}).get("sha256Hash"),
                         "sha1": item.get("file", {}).get("hashes", {}).get("sha1Hash"),
                         "download_url": item.get("@microsoft.graph.downloadUrl"),
+                        "mimeType": mime_type,
+                        "source": "onedrive",
+                        "metadata": PhotoMetadata(
+                            taken_at=taken_at,
+                            latitude=float(lat) if lat is not None else None,
+                            longitude=float(lon) if lon is not None else None,
+                            altitude=float(alt) if alt is not None else None,
+                            description=item.get("description"),
+                            original_filename=item["name"],
+                            date_is_fallback=date_is_fallback,
+                        ),
                     }
                     counter[0] += 1
                     yield file_meta

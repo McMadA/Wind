@@ -70,9 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Common function to handle SSE streaming
     let currentEventSource = null;
 
-    const startStream = (url, body, btn, spinner, btnText, stopBtn) => {
-        // Prevent default form submission redirect
-
+    const startStream = (url, body, btn, spinner, btnText, stopBtn, defaultLabel) => {
         // Reset UI state
         btn.disabled = true;
         spinner.classList.remove('hidden');
@@ -94,10 +92,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         stopBtn.addEventListener('click', onStop);
 
-        // We use fetch to send the POST payload, but the backend returns text/event-stream.
-        // The browser's native EventSource doesn't support POST with a payload body. 
-        // So we will use fetch and read the stream manually.
-
         fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -114,9 +108,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 buffer += decoder.decode(value, { stream: true });
 
-                // Parse SSE lines
                 let parts = buffer.split('\n\n');
-                buffer = parts.pop(); // Keep the incomplete part
+                buffer = parts.pop();
 
                 for (let part of parts) {
                     if (part.startsWith('data: ')) {
@@ -132,26 +125,20 @@ document.addEventListener('DOMContentLoaded', () => {
                                 break;
                             }
 
-                            // Process the chunk character by character to handle \r and \n correctly
                             for (let i = 0; i < textChunk.length; i++) {
                                 const char = textChunk[i];
 
                                 if (char === '\n') {
-                                    // Start a new line
                                     const line = document.createElement('div');
                                     line.className = 'log-line normal';
                                     terminalOutput.appendChild(line);
                                 } else if (char === '\r') {
-                                    // Carriage return: in a terminal, this moves the cursor to the beginning of the line.
-                                    // We'll mimic this by marking the line for clearing upon the NEXT actual character,
-                                    // but if it's immediately followed by \n (i.e. \r\n), we do nothing.
                                     if (i + 1 < textChunk.length && textChunk[i + 1] === '\n') {
-                                        continue; // It's just a Windows newline, ignore the \r
+                                        continue;
                                     } else if (terminalOutput.lastChild) {
                                         terminalOutput.lastChild.setAttribute("data-cr-pending", "true");
                                     }
                                 } else {
-                                    // Append character to the LAST line
                                     if (!terminalOutput.lastChild || terminalOutput.lastChild.classList.contains('system-msg')) {
                                         const line = document.createElement('div');
                                         line.className = 'log-line normal';
@@ -163,12 +150,11 @@ document.addEventListener('DOMContentLoaded', () => {
                                         terminalOutput.lastChild.removeAttribute("data-cr-pending");
                                     }
 
-                                    // Basic coloring logic applied on the fly if error is detected
                                     if (terminalOutput.lastChild.textContent.length < 15) {
                                         const lowerText = textChunk.toLowerCase();
                                         if (lowerText.includes('error') || lowerText.includes('traceback') || lowerText.includes('failed')) terminalOutput.lastChild.className = 'log-line error';
-                                        else if (lowerText.includes('success') || lowerText.includes('done')) terminalOutput.lastChild.className = 'log-line success';
-                                        else if (lowerText.includes('warn') || lowerText.includes('skipping')) terminalOutput.lastChild.className = 'log-line warning';
+                                        else if (lowerText.includes('success') || lowerText.includes('done') || lowerText.includes('imported')) terminalOutput.lastChild.className = 'log-line success';
+                                        else if (lowerText.includes('warn') || lowerText.includes('skip')) terminalOutput.lastChild.className = 'log-line warning';
                                         else if (lowerText.includes('info')) terminalOutput.lastChild.className = 'log-line info';
                                     }
 
@@ -176,7 +162,6 @@ document.addEventListener('DOMContentLoaded', () => {
                                 }
                             }
 
-                            // Autoscroll
                             terminalOutput.scrollTop = terminalOutput.scrollHeight;
 
                         } catch (e) {
@@ -197,12 +182,37 @@ document.addEventListener('DOMContentLoaded', () => {
             spinner.classList.add('hidden');
             stopBtn.classList.add('hidden');
             stopBtn.removeEventListener('click', onStop);
-            btnText.textContent = url.includes('drive') ? 'Start Sync' : 'Start Batch Upload';
+            btnText.textContent = defaultLabel;
             appendLog(`--- Task Finished ---`, 'system-msg');
         });
     };
 
-    // Form Submissions
+    // Google -> iCloud Smart Migration Form Submission
+    document.getElementById('google-icloud-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+
+        const payload = {
+            gdrive_folder: document.getElementById('gi-gdrive-folder').value,
+            icloud_drive_folder: document.getElementById('gi-icloud-folder').value,
+            takeout_dir: document.getElementById('gi-takeout-dir').value || null,
+            use_gphotos_api: document.getElementById('gi-use-gphotos-api').checked,
+            album: document.getElementById('gi-album').value || null,
+            dedup_mode: document.getElementById('gi-dedup').value,
+            skip_documents: document.getElementById('gi-skip-docs').checked,
+            skip_gdrive_photos: document.getElementById('gi-skip-gdrive-photos').checked,
+            refresh_cache: document.getElementById('gi-refresh-cache').checked,
+            dry_run: document.getElementById('gi-dry-run').checked
+        };
+
+        const btn = document.getElementById('gi-start-btn');
+        const spinner = btn.querySelector('.spinner');
+        const btnText = btn.querySelector('.btn-text');
+        const stopBtn = document.getElementById('gi-stop-btn');
+
+        startStream('/api/sync/migrate', payload, btn, spinner, btnText, stopBtn, 'Start Smart Migration');
+    });
+
+    // Custom Cloud Drive Form Submission
     document.getElementById('cloud-drive-form').addEventListener('submit', (e) => {
         e.preventDefault();
 
@@ -211,6 +221,8 @@ document.addEventListener('DOMContentLoaded', () => {
             dest: document.getElementById('cd-dest').value,
             source_path: document.getElementById('cd-source-path').value,
             dest_path: document.getElementById('cd-dest-path').value,
+            file_filter: document.getElementById('cd-filter').value,
+            dedup_mode: document.getElementById('cd-dedup-mode').value,
             on_duplicate: document.getElementById('cd-on-duplicate').value,
             move: document.getElementById('cd-move').checked,
             dry_run: document.getElementById('cd-dry-run').checked,
@@ -222,9 +234,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnText = btn.querySelector('.btn-text');
         const stopBtn = document.getElementById('cd-stop-btn');
 
-        startStream('/api/sync/drive', payload, btn, spinner, btnText, stopBtn);
+        startStream('/api/sync/drive', payload, btn, spinner, btnText, stopBtn, 'Start Sync');
     });
 
+    // Drive to Google Photos Form Submission
     document.getElementById('drive-photos-form').addEventListener('submit', (e) => {
         e.preventDefault();
 
@@ -243,6 +256,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnText = btn.querySelector('.btn-text');
         const stopBtn = document.getElementById('dp-stop-btn');
 
-        startStream('/api/sync/photos', payload, btn, spinner, btnText, stopBtn);
+        startStream('/api/sync/photos', payload, btn, spinner, btnText, stopBtn, 'Start Batch Upload');
     });
 });
